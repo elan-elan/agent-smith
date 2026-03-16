@@ -79,7 +79,7 @@ def build_model(X: pd.DataFrame, y: pd.Series) -> Pipeline:
         learning_rate=0.05,
         subsample=0.8,
         colsample_bytree=0.8,
-        min_child_weight=5,
+        min_child_weight=10,
         scale_pos_weight=(y == 0).sum() / max((y == 1).sum(), 1),
         random_state=RANDOM_SEED,
         n_jobs=-1,
