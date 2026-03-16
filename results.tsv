@@ -1,2 +1,0 @@
-run	commit	val_auc	status	description
-1	2a37ae6	0.612312	keep	baseline: earth(degree=1) default pruning, 4 terms

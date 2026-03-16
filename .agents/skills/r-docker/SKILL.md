@@ -327,89 +327,86 @@ No restart needed — packages install into the running container.
 7. **Stop** the worker: `bash scripts/r_worker.sh stop`
 8. **Summarize**: run `scripts/summarize_results.py`
 
-## Common R Model Recipes
+## Multi-Model Experiment Loop
 
-Quick reference for the most common requests. Use these as the basis for generated scripts.
+When running a batch of R experiments (via agent-smith), follow this pattern.
 
-### MARS / Earth
+### Standard package set
 
-```r
-library(earth)
-model <- earth(x, y, degree = 1, nprune = 20)
-pred <- predict(model, x_val)
+Pre-install this package set when starting the worker. It covers all common classification
+and regression models so you never need to restart mid-loop:
+
+```bash
+bash scripts/r_worker.sh start data/prepared r_output -- pROC earth randomForest ranger xgboost glmnet e1071
 ```
 
-Packages: `earth`
+**Never call `install.packages()` inside a train.R script.** Packages are installed once at
+worker startup. Scripts use `suppressPackageStartupMessages(library(...))` only.
 
-### GLM
+### Starting template
 
-```r
-model <- glm(target ~ ., data = train_df, family = binomial)
-pred <- predict(model, newdata = val_df, type = "response")
-```
+Copy `assets/r-template-tabular-classification.R` to `train.R` in the project root.
+This template supports 7 model families (glm, earth, randomForest, ranger, xgboost,
+glmnet, svm) with a single CONFIG section at the top. Edit `MODEL_TYPE` and the
+model-specific hyperparameters each experiment.
 
-Packages: none (base R)
+### Before writing any R model code
 
-### GAM
+Read `references/r-model-cookbook.md`. It contains:
 
-```r
-library(mgcv)
-model <- gam(target ~ s(x1) + s(x2) + x3, data = train_df, family = binomial)
-```
+- Quick reference table for all 7 models (predict call, class weight arg, package)
+- Known pitfalls per model (e.g., earth weights go on the `earth()` call not in `glm{}`,
+  randomForest needs `as.factor(y)` for classification, xgboost needs `model.matrix()`)
+- Runtime expectations (e.g., earth degree=3 on 50K rows takes 60–300s)
+- Recommended exploration order (fast → slow)
+- One-hot encoding helper for xgboost/glmnet/svm
 
-Packages: `mgcv`
+### Recommended exploration order
 
-### Random Forest
+Start with fast models and move to slower ones:
 
-```r
-library(randomForest)
-model <- randomForest(target ~ ., data = train_df, ntree = 500)
-```
+1. **glm** — instant baseline, always run first
+2. **glmnet** — fast regularized linear, try alpha=0/0.5/1
+3. **earth** — MARS, degree 1→2→3, increasing thresh
+4. **ranger** — fast random forest, num.trees 500→1000
+5. **xgboost** — gradient boosting, tune depth/eta/nrounds
+6. **randomForest** — slower classic RF, use for comparison only
+7. **svm** — slowest, try only if others plateau
 
-Packages: `randomForest`
+### Runtime expectations
 
-### SVR / SVM
+| Model | 50K rows | Notes |
+|---|---|---|
+| glm | <5s | Always works |
+| glmnet | <5s | |
+| earth (degree=1) | 5–15s | |
+| earth (degree=2) | 15–60s | |
+| earth (degree=3) | 60–300s | Avoid nfold>0 |
+| ranger (500 trees) | 10–30s | |
+| xgboost (100 rounds) | 5–20s | |
+| randomForest (500 trees) | 30–120s | |
+| svm (radial) | 120–600s | Consider subsampling |
 
-```r
-library(e1071)
-model <- svm(x, y, type = "eps-regression", kernel = "radial", cost = 2)
-```
-
-Packages: `e1071`
-
-### ggplot2 Visualization
-
-```r
-library(ggplot2)
-p <- ggplot(df, aes(x = var1, y = var2)) +
-  geom_point() +
-  theme_minimal() +
-  labs(title = "Title", x = "X", y = "Y")
-ggsave(file.path(output_dir, "plot.png"), p, width = 8, height = 6, dpi = 300)
-```
-
-Packages: `ggplot2`
-
-### XGBoost (R)
-
-```r
-library(xgboost)
-dtrain <- xgb.DMatrix(data = as.matrix(x_train), label = y_train)
-dval <- xgb.DMatrix(data = as.matrix(x_val), label = y_val)
-params <- list(objective = "binary:logistic", eval_metric = "auc", max_depth = 5, eta = 0.05)
-model <- xgb.train(params, dtrain, nrounds = 100, watchlist = list(val = dval))
-```
-
-Packages: `xgboost`
+Set timeout accordingly. Default 300s is fine for most; use 600s for svm.
 
 ## Resources
 
-- `assets/r-template-earth.R` — MARS/earth model template
-- `assets/r-template-glm.R` — GLM template
+### Templates
+
+- `assets/r-template-tabular-classification.R` — **Primary template for classification experiments.** Multi-model (glm, earth, randomForest, ranger, xgboost, glmnet, svm). Use this as the starting point for any tabular classification task.
+- `assets/r-template-prepare.R` — Data preparation template (analogous to prepare.py). One-time preprocessing: drop columns, Yes/No→0/1, string→factor.
+- `assets/r-template-earth.R` — MARS/earth regression-only template (legacy)
+- `assets/r-template-glm.R` — GLM template (legacy)
 - `assets/r-template-ggplot2.R` — ggplot2 visualization template
-- `assets/r-template-generic.R` — Generic R script template
+- `assets/r-template-generic.R` — Generic R script skeleton
 - `assets/r-task-template.md` — Task description template
+
+### References
+
+- `references/r-model-cookbook.md` — **Read this before writing any R model code.** API quick reference, known pitfalls, runtime expectations, one-hot encoding helper.
+
+### Scripts
+
 - `scripts/run_r.sh` — One-off Docker execution (with package cache volume)
 - `scripts/r_worker.sh` — Persistent container for experiment loops
 - `scripts/csv_convert.py` — Data format conversion helper
-- Reference: `references/run_mars.sh` and `references/train_earth.R` in the project root for real-world examples

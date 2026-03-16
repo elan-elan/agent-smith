@@ -20,14 +20,56 @@ Prefer the repo's existing structure over renaming files just to match the defau
 
 The experiment loop is not limited to Python models. When the user requests a model family that lives in another language — such as MARS/earth in R — delegate execution to the appropriate runtime skill.
 
-For **R models**, use the **r-docker** skill. This means:
+### R Models (via r-docker skill)
 
-- Run R code inside Docker via `scripts/r_worker.sh` (experiment loop) or `scripts/run_r.sh` (one-off). The r-docker skill has the full contract.
-- The mutable experiment surface becomes an `.R` script (e.g., `train_earth.R`) instead of `train.py`. Both can coexist — some experiments edit `train.py`, others edit the `.R` script.
-- Metric output must still follow the standard metrics block format so `results.tsv` stays consistent across Python and R experiments.
-- Copy the r-docker helper scripts (`r_worker.sh`, `run_r.sh`) into the repo's `scripts/` directory if they are not already there.
+**Before writing any R code**, read the r-docker skill's `references/r-model-cookbook.md`. It contains the correct API for every model, known pitfalls, and runtime expectations.
 
-**Hard rule:** never install R locally (`brew install r`, `conda install r-base`, etc.), never use Python-to-R bridges (`rpy2`), and never substitute a Python reimplementation (`pyearth`, `sklearn-contrib-py-earth`) when the user asks for an R package. The r-docker skill exists precisely to avoid these workarounds. If Docker is unavailable, surface the problem and ask the user — do not silently switch strategies.
+#### Setup
+
+1. Copy `r_worker.sh` and `run_r.sh` from the r-docker skill's `scripts/` into the repo's `scripts/` directory.
+2. Copy `assets/r-template-tabular-classification.R` from the r-docker skill to `train.R` in the project root. This is the mutable experiment surface for R — analogous to `train.py`.
+3. Edit the CONFIG section in `train.R` (DATA_FILE, TARGET_COL, MODEL_TYPE, etc.) for the dataset.
+4. Start the worker with **all common packages** pre-installed:
+   ```bash
+   bash scripts/r_worker.sh start data/prepared r_output -- pROC earth randomForest ranger xgboost glmnet e1071
+   ```
+5. Run baseline and record in `results.tsv`.
+
+#### Mutable file
+
+The mutable file is **`train.R`** (generic name). Do not use model-specific names like `train_earth.R` — the whole point is to switch models by editing the CONFIG section.
+
+Both `train.py` and `train.R` can coexist. Some experiments edit `train.py`, others edit `train.R`. Use `results.tsv` to track all results regardless of language.
+
+#### Experiment loop cycle
+
+Same edit → run → commit/revert pattern as Python:
+
+1. **Edit** `train.R` — change MODEL_TYPE, hyperparameters, preprocessing
+2. **Commit** the change
+3. **Run** `bash scripts/r_worker.sh run train.R 300 2>&1 | tee run.log`
+4. **Read** metrics from `run.log`
+5. **Record** in `results.tsv`
+6. **Keep or revert** based on metric improvement
+
+#### Package management
+
+- Install all packages at worker startup (see standard set above)
+- **Never** call `install.packages()` inside `train.R`
+- If a new package is needed mid-loop: `bash scripts/r_worker.sh install <pkg>`
+
+#### Teardown
+
+```bash
+bash scripts/r_worker.sh stop
+```
+
+#### Hard rules
+
+- **Never install R locally** (`brew install r`, `conda install r-base`, etc.)
+- **Never use Python-to-R bridges** (`rpy2`)
+- **Never substitute Python reimplementations** (`pyearth`, `sklearn-contrib-py-earth`) when the user asks for an R package
+- If Docker is unavailable, surface the problem and ask the user — do not silently switch strategies
 
 ## Progressive Disclosure
 

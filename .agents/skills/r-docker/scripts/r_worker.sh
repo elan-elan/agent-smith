@@ -149,12 +149,27 @@ cmd_run() {
   # Copy the script into the container (allows editing between runs)
   docker cp "$r_script" "$CONTAINER_NAME":/workspace/script.R
 
-  # Execute with timeout
-  timeout "$timeout_secs" \
-    docker exec "$CONTAINER_NAME" \
-    Rscript /workspace/script.R /workspace/data /workspace/output
+  # Resolve timeout command (macOS lacks `timeout`; use `gtimeout` from coreutils)
+  local timeout_cmd=""
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_cmd="timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    timeout_cmd="gtimeout"
+  fi
 
-  local exit_code=$?
+  # Execute (with or without timeout)
+  local exit_code=0
+  if [ -n "$timeout_cmd" ]; then
+    "$timeout_cmd" "$timeout_secs" \
+      docker exec "$CONTAINER_NAME" \
+      Rscript /workspace/script.R /workspace/data /workspace/output \
+      || exit_code=$?
+  else
+    docker exec "$CONTAINER_NAME" \
+      Rscript /workspace/script.R /workspace/data /workspace/output \
+      || exit_code=$?
+  fi
+
   if [ $exit_code -eq 124 ]; then
     echo "Error: R script timed out after ${timeout_secs}s" >&2
     return 124
