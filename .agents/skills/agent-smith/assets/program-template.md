@@ -15,15 +15,18 @@ To set up a new run, work with the user to:
    - instructions: `{{program_path}}`
 3. verify that `uv` is installed and available on `PATH`; if not, install it first
 4. inspect the git state and confirm whether changes stay local or should also be pushed to a remote repository
-5. read the in-scope files for full context
-6. verify that prepared data exists or that the prep command is runnable
-7. verify that Python commands are run with `uv run`
-8. initialize a simple experiment log such as `results.tsv` if the repo does not already have one
-9. confirm the baseline command and metric contract
+5. if the repo already has a committed baseline and the current branch is `main` or another stable branch, create a separate experiment branch before autotuning
+6. read the in-scope files for full context
+7. verify that prepared data exists or that the prep command is runnable
+8. verify that Python commands are run with `uv run`
+9. initialize `results.tsv` with a header row if the repo does not already have one
+10. confirm the baseline command and metric contract
 
 ## Experimentation
 
 Each experiment should optimize `{{metric_name}}`, where `{{metric_goal}}` is better.
+
+The first run on a fresh experiment branch should always be the unmodified baseline.
 
 Default run command:
 
@@ -47,31 +50,77 @@ Avoid modifying:
 
 unless the user explicitly broadens the search space.
 
-## Logging
+All else equal, prefer simpler changes. A tiny gain that adds a lot of complexity is usually not worth keeping. An equally good or better result with less complexity is a strong outcome.
 
-Record experiments in a simple tab-separated file when helpful:
+## Output Format
+
+Make the training script print a final summary block. Prefer a machine-readable block like:
 
 ```text
-commit	metric	status	description
+---
+primary_metric:    0.123456
+metric_name:       {{metric_name}}
+metric_goal:       {{metric_goal}}
+training_seconds:  300.0
+total_seconds:     318.4
+status:            ok
 ```
 
-Use `keep`, `discard`, or `crash` for status unless the repo already has a different convention.
+Read the summary from `run.log` after each run instead of relying on streamed output.
+
+Example:
+
+```bash
+grep "^primary_metric:\|^status:" run.log
+```
+
+## Logging
+
+Record experiments in `results.tsv` using tab-separated fields:
+
+```text
+commit	primary_metric	status	description
+```
+
+Use `keep`, `discard`, or `crash` for status unless the repo already has a different convention. Leave `results.tsv` untracked unless the user explicitly wants it committed.
 
 ## Loop
 
 Repeat:
 
 1. inspect the current repo state
-2. make one experiment-sized change
-3. run the training command
-4. read the final metric block
-5. record the result
-6. keep or discard the change based on whether it improved `{{metric_name}}`
+2. if this branch has no baseline result yet, run the baseline as-is and record it
+3. otherwise make one experiment-sized change
+4. if git tracking is enabled, commit the experiment
+5. run the training command as `{{train_command}} > run.log 2>&1` and do not use `tee`
+6. read the final metric block from `run.log`
+7. if the final metric block is missing, inspect `tail -n 50 run.log`, attempt an easy fix, and otherwise record a crash
+8. record the result in `results.tsv`
+9. keep or discard the change based on whether it improved `{{metric_name}}`
 
 ## Guardrails
 
 - prefer small, reviewable diffs
 - keep the baseline runnable at all times
+- do not commit exploratory autotuning runs directly to `main` when a stable committed baseline already exists
+- use a hard timeout of roughly 2x the declared run budget
 - avoid dependency churn unless the user approves it
 - when a dependency is required, prefer `uv add` over manual dependency edits
 - prefer simpler changes when gains are similar
+
+If the user explicitly starts autonomous mode, continue running experiments until interrupted unless you hit a hard blocker.
+
+## Wrap-up
+
+After a completed run batch, summarize and visualize the experiment history from `results.tsv`.
+
+If this repo vendors Agent Smith under `.agents/skills/agent-smith`, run:
+
+```bash
+uv run python .agents/skills/agent-smith/scripts/summarize_results.py results.tsv --goal {{metric_goal}}
+```
+
+This should generate:
+
+- `results_summary.md`
+- `progress.svg`

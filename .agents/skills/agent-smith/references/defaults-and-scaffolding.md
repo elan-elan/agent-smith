@@ -66,6 +66,7 @@ Use prompts like:
 - `I did not find a train script. Would you like me to create a baseline train.py for you? If yes, tell me the task type, model preference, target, and runtime constraints.`
 - `I did not find a program file. Would you like me to create a baseline program.md for you? If yes, tell me which files should be mutable, the run command, and the metric contract.`
 - `If you want me to track or push experiment commits, give me the git remote or GitHub repository URL now. If not, I will assume local git tracking only.`
+- `I see this repo is already committed to git. I recommend creating a separate experiment branch instead of committing autotuning runs to main. Should I create one now?`
 
 Ask follow-ups only when required:
 
@@ -80,6 +81,58 @@ Also confirm:
 - should all Python commands be normalized to `uv run`? default: yes
 - if a dependency is missing, should the skill add it with `uv add` immediately? default: yes
 - should git tracking remain local, or should the agent also push to a remote? default: local only unless the user gives a remote URL
+- if the repo already has a committed baseline, should autotuning happen on a dedicated experiment branch? default: yes
+
+## Git workflow
+
+If the repo is already under git:
+
+- inspect the current branch and whether `HEAD` already has commits
+- if the current branch is `main`, `master`, or another stable branch, default to creating a dedicated experiment branch before committing autotuning changes
+- keep `main` as the stable baseline branch
+- use branch names such as `agent-smith/<tag>` or `experiments/<tag>`
+- only push experiment branches when the user wants remote tracking
+
+If the repo is not under git yet, initialize it first if the user wants commit-based experiment tracking.
+
+## Experiment loop defaults
+
+Use these defaults unless the user wants a different cadence:
+
+- run the baseline first on a fresh branch before modifying code
+- make one experiment-sized change per run
+- redirect command output to `run.log`
+- read the final summary block from `run.log` rather than streaming full output
+- if the summary block is missing, inspect `tail -n 50 run.log`
+- if the error is trivial, fix and rerun
+- if the idea is broken or the run keeps crashing, log `crash` and move on
+- use a hard timeout of roughly 2x the per-run budget
+- if the workflow is commit-per-idea, keep only improving commits and discard or revert the rest
+
+Prefer a simple tab-separated experiment log:
+
+```text
+commit	primary_metric	status	description
+```
+
+Initialize `results.tsv` with just the header row before the first baseline run. Use `keep`, `discard`, or `crash` for status. Leave `results.tsv` untracked by git unless the user explicitly wants it committed.
+
+## Post-run summarization
+
+After a completed run batch, or when the user asks for a recap, run the bundled summary script against `results.tsv`.
+
+If the skill is stored inside the repo at `.agents/skills/agent-smith`, prefer:
+
+```bash
+uv run python .agents/skills/agent-smith/scripts/summarize_results.py results.tsv --goal higher
+```
+
+Adjust `--goal` to `lower` when lower metrics are better. The script will generate:
+
+- `results_summary.md`
+- `progress.svg`
+
+The script auto-detects common metric columns such as `primary_metric`, `metric`, and `val_bpb`.
 
 ## Package management
 
@@ -172,5 +225,8 @@ When generating `program.md` from the template:
 - state the keep/discard rule in terms of the chosen metric
 - if Agent Smith generated the file, tell the user to customize it before long autonomous runs
 - include git branch and remote expectations when the user has provided them
+- tell the user that autotuning should happen on a separate branch when the repo already has a stable committed baseline
+- add baseline-first, timeout, crash-handling, and `run.log` rules unless the user has a better existing workflow
+- include a post-run summary step that runs `scripts/summarize_results.py` on `results.tsv`
 
 Keep the first version concise. It is an operating guide, not full documentation.

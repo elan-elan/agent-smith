@@ -36,6 +36,8 @@ Ask for:
 
 If the user wants remote tracking, ask for the repository URL up front. A GitHub link is not strictly required to run Agent Smith, but it is useful if the user wants commits pushed, changes backed up remotely, or experiment branches reviewed outside the local machine.
 
+If the repo is already committed to git, do not default to committing autotuning runs on `main`. Ask whether to create a dedicated experiment branch first, and default to yes.
+
 If a file is missing, ask one-by-one whether to create it from scratch based on the user's description. Use this pattern:
 
 - `prepare.py` missing: ask whether to create it, and if yes ask for the data source, raw format, preprocessing steps, prepared outputs, and any download command or auth constraints
@@ -72,10 +74,12 @@ Prefer existing files over renaming everything to match the default skill layout
 2. check whether `uv` is available; if not, install it first and verify `uv --version`
 3. inspect or create `pyproject.toml` and standardize Python commands around `uv run`
 4. inspect the git state and ask whether changes should stay local or also be pushed to a remote
-5. confirm the metric contract and runtime budget
-6. keep immutable setup/evaluation separate from mutable experiment logic where possible
-7. scaffold missing files only after inspection and user confirmation of the defaults
-8. summarize the final contract before kicking off experiment work
+5. if the repo already has commits and the current branch is a default branch such as `main` or `master`, create a dedicated experiment branch before autotuning
+6. confirm the metric contract and runtime budget
+7. initialize `results.tsv` with a header row if the repo does not already have an experiment log
+8. keep immutable setup/evaluation separate from mutable experiment logic where possible
+9. scaffold missing files only after inspection and user confirmation of the defaults
+10. summarize the final contract before kicking off experiment work
 
 Leave the repo with:
 
@@ -84,6 +88,8 @@ Leave the repo with:
 - a resolved instructions file
 - a runnable baseline command
 - a clear git tracking plan, including remote URL if the user wants pushes
+- a dedicated experiment branch when autotuning should not touch `main`
+- a baseline result recorded before aggressive experimentation begins
 - a clear metric contract for later keep/discard runs
 
 ## Scaffolding Rules
@@ -118,6 +124,8 @@ If no `program.md` exists, adapt `assets/program-template.md` and fill in its pl
 
 If Agent Smith generated `program.md`, remind the user that it is only a baseline and should be customized with repo-specific instructions, branch conventions, and experiment preferences.
 
+If the repo is already under git and has a committed baseline, keep `main` as the stable branch and run autotuning on a separate branch such as `agent-smith/<tag>` or `experiments/<tag>`.
+
 ## Experiment Loop Contract
 
 Favor the three-file split when possible:
@@ -126,11 +134,34 @@ Favor the three-file split when possible:
 - training code is the main mutable surface
 - instructions describe how the agent should run and judge experiments
 
-Do not force one literal training loop on every repo. Reuse the pattern, not a fixed implementation.
+Adapt these default loop rules unless the user explicitly wants a different process:
+
+- the first run on a fresh experiment branch should always be the unmodified baseline
+- make one experiment-sized change at a time
+- if git tracking is enabled, commit each experiment separately
+- redirect full training output to `run.log` instead of flooding the context
+- read the final metric block from `run.log`
+- if the final metric block is missing, inspect the last lines of `run.log`, attempt an easy fix, and otherwise mark the run as a crash
+- record every run in `results.tsv` using tab-separated fields
+- if the metric improved in the desired direction, keep the change and advance from there
+- if the metric is equal or worse, revert or discard the experiment if the workflow is commit-per-idea
+- prefer simpler changes when gains are similar
+
+Use a hard timeout. A good default is roughly 2x the per-run budget. If a run exceeds that limit, stop it and treat it as a failed experiment.
+
+If the user explicitly wants autonomous mode, do not pause between experiments unless blocked by missing credentials, missing data, or another hard blocker. Continue until interrupted.
+
+After a run batch is complete, or when the user asks for a recap, run the bundled `scripts/summarize_results.py` against `results.tsv` to generate:
+
+- `results_summary.md`
+- `progress.svg`
+
+Prefer `uv run python .agents/skills/agent-smith/scripts/summarize_results.py results.tsv --goal <higher|lower>` when the skill is vendored into the repo at that path.
 
 ## Resources
 
 - Read `references/defaults-and-scaffolding.md` for candidate path order, follow-up questions, and scaffold heuristics.
+- Run `scripts/summarize_results.py` after completed experiment batches to summarize `results.tsv` and generate a plot.
 - Adapt `assets/pyproject-template.toml` when the repo has no `pyproject.toml`.
 - Adapt `assets/prepare-template.py` when the repo has no prep script.
 - Use `assets/program-template.md` when the repo has no usable instructions file.
