@@ -1,0 +1,176 @@
+# Defaults And Scaffolding
+
+## Candidate path order
+
+Use these as discovery hints, not rigid rules.
+
+### Package metadata
+
+Check for `pyproject.toml` at repo root first. If none exists, create it from `assets/pyproject-template.toml` before adding dependencies or standardizing `uv` commands.
+
+### Prep candidates
+
+Check in this order:
+
+1. `prepare.py`
+2. `scripts/prepare.py`
+3. `src/**/prepare.py`
+4. `download*.py`
+5. `*kaggle*.py`
+6. `data*.py`
+7. `prep*.py`
+
+If none exists and the user only has raw data, create `prepare.py` at repo root.
+
+### Train candidates
+
+Check in this order:
+
+1. `train.py`
+2. `scripts/train.py`
+3. `src/**/train.py`
+4. `fit.py`
+5. `main.py`
+6. `run_train.py`
+7. `experiment*.py`
+
+If none exists, create `train.py` at repo root.
+
+### Program candidates
+
+Check in this order:
+
+1. `program.md`
+2. `PROGRAM.md`
+3. `prompts/program.md`
+4. `docs/program.md`
+5. `AGENTS.md` or `CLAUDE.md` only if they already contain repo-specific experiment instructions
+
+If none exists, create `program.md` at repo root from `assets/program-template.md`.
+
+## Minimum question set
+
+Ask these first:
+
+1. Which path should count as the prep script?
+2. Which path should count as the training script?
+3. Which path should count as the instructions file?
+4. What metric should be optimized, is higher or lower better, and what budget should each run use?
+5. Should experiment tracking use local git only, or should commits also be pushed to a remote repository?
+
+If any of the three core files are missing, also ask whether to create that file now.
+
+Use prompts like:
+
+- `I did not find a prep script. Would you like me to create a baseline prepare.py for you? If yes, tell me the data source, expected outputs, and any preprocessing constraints.`
+- `I did not find a train script. Would you like me to create a baseline train.py for you? If yes, tell me the task type, model preference, target, and runtime constraints.`
+- `I did not find a program file. Would you like me to create a baseline program.md for you? If yes, tell me which files should be mutable, the run command, and the metric contract.`
+- `If you want me to track or push experiment commits, give me the git remote or GitHub repository URL now. If not, I will assume local git tracking only.`
+
+Ask follow-ups only when required:
+
+- What task type is this: classification, regression, ranking, generation, fine-tuning, search, or other?
+- Where does the prepared dataset live after prep finishes?
+- Which column, field, or artifact is the prediction target?
+- Which dependencies are already available and which are off-limits?
+- What hardware should the baseline assume?
+
+Also confirm:
+
+- should all Python commands be normalized to `uv run`? default: yes
+- if a dependency is missing, should the skill add it with `uv add` immediately? default: yes
+- should git tracking remain local, or should the agent also push to a remote? default: local only unless the user gives a remote URL
+
+## Package management
+
+Use `uv` for Python execution and dependency changes.
+
+- check `which uv` first
+- if `uv` is missing, install it before any `uv run` or `uv add` step
+- prefer a persistent base-shell install, e.g. `~/.local/bin`, instead of a conda-only install
+- make sure the shell startup file used by non-interactive shells exposes that path, then verify with `which uv` and `uv --version`
+- run scripts as `uv run prepare.py`, `uv run train.py`, or `uv run python path/to/script.py`
+- create `pyproject.toml` from `assets/pyproject-template.toml` if missing
+- when a new dependency is required, run `uv add <package>` and let that update `pyproject.toml`
+- avoid manually editing dependency lines unless the `uv add` command is not possible
+- if custom indexes are needed, add the matching `[tool.uv.sources]` and `[[tool.uv.index]]` entries after the dependency is introduced
+
+Default install flow when `uv` is missing:
+
+1. install `uv` with the official installer
+2. place it in a persistent user path such as `~/.local/bin`
+3. add that path to the shell startup file that future non-interactive shells will read
+4. verify `which uv` and `uv --version`
+5. only then continue with `uv add` or `uv run`
+
+## Scaffolding `prepare.py`
+
+Keep `prepare.py` thin and reproducible:
+
+- download or locate raw data
+- perform stable preprocessing only
+- write prepared artifacts to predictable paths
+- keep evaluation constants and immutable utilities here if that matches the repo
+- do not mix experiment search logic into this file
+
+If a Kaggle or shell download script already exists, wrap or reuse it instead of duplicating the logic.
+
+If the user wants a new prep file from scratch, start from `assets/prepare-template.py`.
+
+## Scaffolding `train.py`
+
+Prefer the project's current stack:
+
+1. existing project training code
+2. existing project ML libraries
+3. lightweight libraries already declared in the repo
+4. only then a new minimal baseline, if the user approves new dependencies
+
+For a CSV or tabular task:
+
+- inspect the columns first
+- infer or ask whether the target is categorical or continuous
+- create a deterministic train/validation split
+- place model and optimization knobs near the top
+- print a final metric block the agent can grep later
+
+If `pandas` and `scikit-learn` are already available, adapt `assets/train-template-tabular.py` instead of rewriting the whole baseline from scratch.
+
+Otherwise, start from `assets/train-template-generic.py` and replace the placeholder functions with the simplest repo-specific baseline that fits the user's description.
+
+Make the script easy to iterate on:
+
+- one file if possible
+- low ceremony
+- obvious hyperparameters
+- minimal hidden state
+
+## Final summary block
+
+Prefer a machine-readable block like:
+
+```text
+---
+primary_metric:    0.123456
+metric_name:       val_loss
+metric_goal:       lower
+training_seconds:  300.0
+total_seconds:     318.4
+status:            ok
+```
+
+Add extra fields only when they are useful and stable.
+
+## `program.md` adaptation
+
+When generating `program.md` from the template:
+
+- fill in resolved paths, not placeholders
+- name the mutable file or files explicitly
+- name the fixed evaluation contract explicitly
+- state the exact `uv run ...` command
+- state the keep/discard rule in terms of the chosen metric
+- if Agent Smith generated the file, tell the user to customize it before long autonomous runs
+- include git branch and remote expectations when the user has provided them
+
+Keep the first version concise. It is an operating guide, not full documentation.

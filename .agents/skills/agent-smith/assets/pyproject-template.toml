@@ -1,0 +1,22 @@
+[project]
+name = "{{project_name}}"
+version = "0.1.0"
+description = "{{project_description}}"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    # Add packages with `uv add <package>` instead of editing this list by hand.
+]
+
+# Optional: add custom package sources only when the experiment requires them.
+# Example:
+#
+# [tool.uv.sources]
+# torch = [
+#     { index = "pytorch-cu128" },
+# ]
+#
+# [[tool.uv.index]]
+# name = "pytorch-cu128"
+# url = "https://download.pytorch.org/whl/cu128"
+# explicit = true

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Smith"
+  short_description: "Scaffold Agent Smith experiment loops"
+  default_prompt: "Use $agent-smith to turn this repo into an Agent Smith experiment loop."

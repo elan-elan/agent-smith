@@ -1,0 +1,11 @@
+[project]
+name = "agent-smith"
+version = "0.1.0"
+description = "Agent Smith experiment loop for Kaggle insurance claims binary classification"
+readme = "program.md"
+requires-python = ">=3.10"
+dependencies = [
+    "kagglehub>=1.0.0",
+    "pandas>=2.3.3",
+    "scikit-learn>=1.7.2",
+]
