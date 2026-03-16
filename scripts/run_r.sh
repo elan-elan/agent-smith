@@ -61,14 +61,6 @@ if ! docker image inspect "$DOCKER_IMAGE" >/dev/null 2>&1; then
   docker pull "$DOCKER_IMAGE"
 fi
 
-# ── Resolve timeout command (macOS lacks `timeout`) ──────────────────
-TIMEOUT_CMD=""
-if command -v timeout >/dev/null 2>&1; then
-  TIMEOUT_CMD="timeout"
-elif command -v gtimeout >/dev/null 2>&1; then
-  TIMEOUT_CMD="gtimeout"
-fi
-
 # ── Run ──────────────────────────────────────────────────────────────
 echo "Running R script in Docker ($DOCKER_IMAGE)"
 echo "  Script:  $R_SCRIPT"
@@ -77,28 +69,16 @@ echo "  Output:  $OUTPUT_DIR"
 echo "  Timeout: ${TIMEOUT}s"
 echo ""
 
-EXIT_CODE=0
-if [ -n "$TIMEOUT_CMD" ]; then
-  "$TIMEOUT_CMD" "$TIMEOUT" docker run --rm \
-    -v r-pkg-cache:/usr/local/lib/R/site-library \
-    -v "$R_SCRIPT":/workspace/script.R:ro \
-    -v "$DATA_DIR":/workspace/data:ro \
-    -v "$OUTPUT_DIR":/workspace/output \
-    -w /workspace \
-    "$DOCKER_IMAGE" \
-    Rscript script.R /workspace/data /workspace/output \
-    || EXIT_CODE=$?
-else
-  docker run --rm \
-    -v r-pkg-cache:/usr/local/lib/R/site-library \
-    -v "$R_SCRIPT":/workspace/script.R:ro \
-    -v "$DATA_DIR":/workspace/data:ro \
-    -v "$OUTPUT_DIR":/workspace/output \
-    -w /workspace \
-    "$DOCKER_IMAGE" \
-    Rscript script.R /workspace/data /workspace/output \
-    || EXIT_CODE=$?
-fi
+timeout "$TIMEOUT" docker run --rm \
+  -v r-pkg-cache:/usr/local/lib/R/site-library \
+  -v "$R_SCRIPT":/workspace/script.R:ro \
+  -v "$DATA_DIR":/workspace/data:ro \
+  -v "$OUTPUT_DIR":/workspace/output \
+  -w /workspace \
+  "$DOCKER_IMAGE" \
+  Rscript script.R /workspace/data /workspace/output
+
+EXIT_CODE=$?
 
 if [ $EXIT_CODE -eq 124 ]; then
   echo ""
