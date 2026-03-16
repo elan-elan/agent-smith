@@ -1,0 +1,2 @@
+experiment	val_auc	status	description
+1	0.625464	ok	baseline: LogisticRegression(saga, balanced)
