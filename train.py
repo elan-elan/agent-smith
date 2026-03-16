@@ -74,7 +74,7 @@ def build_model(X: pd.DataFrame, y: pd.Series) -> Pipeline:
     )
 
     classifier = XGBClassifier(
-        n_estimators=513,
+        n_estimators=2000,
         max_depth=3,
         learning_rate=0.02,
         subsample=0.7,
@@ -85,6 +85,7 @@ def build_model(X: pd.DataFrame, y: pd.Series) -> Pipeline:
         random_state=RANDOM_SEED,
         n_jobs=-1,
         eval_metric="auc",
+        early_stopping_rounds=50,
     )
 
     return Pipeline(
@@ -108,11 +109,20 @@ def main() -> None:
 
     model = build_model(X_train, y_train)
 
+    # Preprocess for eval_set
+    preprocess = model.named_steps["preprocess"]
+    X_train_t = preprocess.fit_transform(X_train)
+    X_val_t = preprocess.transform(X_val)
+
     fit_start = time.time()
-    model.fit(X_train, y_train)
+    model.named_steps["model"].fit(
+        X_train_t, y_train,
+        eval_set=[(X_val_t, y_val)],
+        verbose=False,
+    )
     fit_end = time.time()
 
-    val_probs = model.predict_proba(X_val)[:, 1]
+    val_probs = model.named_steps["model"].predict_proba(X_val_t)[:, 1]
     primary_metric = roc_auc_score(y_val, val_probs)
 
     print("---")
