@@ -74,7 +74,7 @@ def build_model(X: pd.DataFrame, y: pd.Series) -> Pipeline:
     )
 
     classifier = XGBClassifier(
-        n_estimators=512,
+        n_estimators=513,
         max_depth=3,
         learning_rate=0.02,
         subsample=0.7,
