@@ -28,13 +28,15 @@ Each experiment should optimize `{{metric_name}}`, where `{{metric_goal}}` is be
 
 The first run on a fresh experiment branch should always be the unmodified baseline.
 
+Stop condition for this batch:
+
+`{{stop_rule}}`
+
 Default run command:
 
 ```bash
 {{train_command}}
 ```
-
-Default budget per run: `{{time_budget}}`
 
 If a new Python dependency is required during experimentation, add it with `uv add <package>` so `pyproject.toml` stays in sync.
 
@@ -97,18 +99,20 @@ Repeat:
 7. if the final metric block is missing, inspect `tail -n 50 run.log`, attempt an easy fix, and otherwise record a crash
 8. record the result in `results.tsv`
 9. keep or discard the change based on whether it improved `{{metric_name}}`
+10. stop when the batch-level stop rule above has been reached
 
 ## Guardrails
 
 - prefer small, reviewable diffs
 - keep the baseline runnable at all times
 - do not commit exploratory autotuning runs directly to `main` when a stable committed baseline already exists
-- use a hard timeout of roughly 2x the declared run budget
+- infer per-run runtime from the baseline or the last comparable successful run, because different model families may take very different amounts of time
+- use a hard timeout of roughly 2x that inferred runtime
 - avoid dependency churn unless the user approves it
 - when a dependency is required, prefer `uv add` over manual dependency edits
 - prefer simpler changes when gains are similar
 
-If the user explicitly starts autonomous mode, continue running experiments until interrupted unless you hit a hard blocker.
+If the user explicitly starts autonomous mode, continue running experiments until interrupted or until the batch-level stop rule is reached, unless you hit a hard blocker.
 
 ## Wrap-up
 

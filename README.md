@@ -1,10 +1,14 @@
-# Autotuning
+# Agent Smith
+
+<p align="center">
+  <img src="data/agent_smith.png" alt="Agent Smith" width="260" />
+</p>
 
 This repository is intended to become a hub for agent skills related to machine learning, experimentation, and automated tuning workflows.
 
 For now, it includes:
 
-- the `agent-smith` skill in [`.agents/skills/agent-smith/`](/Users/yirending/code/autotuning/.agents/skills/agent-smith/SKILL.md)
+- the base `agent-smith` skill in [`.agents/skills/agent-smith/`](/Users/yirending/code/autotuning/.agents/skills/agent-smith/SKILL.md)
 - a small working demo project for tabular binary classification on the Kaggle insurance claims dataset
 
 The longer-term goal is to grow this repository into a collection of reusable skills for different ML and experimentation tasks, while keeping concrete example projects here for testing and demos.

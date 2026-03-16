@@ -55,7 +55,7 @@ Ask these first:
 1. Which path should count as the prep script?
 2. Which path should count as the training script?
 3. Which path should count as the instructions file?
-4. What metric should be optimized, is higher or lower better, and what budget should each run use?
+4. What metric should be optimized, is higher or lower better, and, if you have not already specified one, what single batch-level stop rule should I use: maximum experiments, maximum total wall-clock time, or early stop after N non-improving runs?
 5. Should experiment tracking use local git only, or should commits also be pushed to a remote repository?
 
 If any of the three core files are missing, also ask whether to create that file now.
@@ -63,10 +63,11 @@ If any of the three core files are missing, also ask whether to create that file
 Use prompts like:
 
 - `I did not find a prep script. Would you like me to create a baseline prepare.py for you? If yes, tell me the data source, expected outputs, and any preprocessing constraints.`
-- `I did not find a train script. Would you like me to create a baseline train.py for you? If yes, tell me the task type, model preference, target, and runtime constraints.`
+- `I did not find a train script. Would you like me to create a baseline train.py for you? If yes, tell me the task type, model preference, target, and any hard hardware or dependency constraints.`
 - `I did not find a program file. Would you like me to create a baseline program.md for you? If yes, tell me which files should be mutable, the run command, and the metric contract.`
 - `If you want me to track or push experiment commits, give me the git remote or GitHub repository URL now. If not, I will assume local git tracking only.`
 - `I see this repo is already committed to git. I recommend creating a separate experiment branch instead of committing autotuning runs to main. Should I create one now?`
+- `I do not need a fixed per-run budget up front. If you have not already set one batch-level limit, give me one of these: maximum experiments, maximum total wall-clock time, or early stop after N non-improving runs.`
 
 Ask follow-ups only when required:
 
@@ -82,6 +83,7 @@ Also confirm:
 - if a dependency is missing, should the skill add it with `uv add` immediately? default: yes
 - should git tracking remain local, or should the agent also push to a remote? default: local only unless the user gives a remote URL
 - if the repo already has a committed baseline, should autotuning happen on a dedicated experiment branch? default: yes
+- if the user has not already set one, which single batch-level stop rule should govern the run? default: ask for one; if the user does not care, prefer `max_experiments`
 
 ## Git workflow
 
@@ -101,13 +103,15 @@ Use these defaults unless the user wants a different cadence:
 
 - run the baseline first on a fresh branch before modifying code
 - make one experiment-sized change per run
+- infer per-run runtime expectations from the baseline or from recent comparable successful runs
 - redirect command output to `run.log`
 - read the final summary block from `run.log` rather than streaming full output
 - if the summary block is missing, inspect `tail -n 50 run.log`
 - if the error is trivial, fix and rerun
 - if the idea is broken or the run keeps crashing, log `crash` and move on
-- use a hard timeout of roughly 2x the per-run budget
+- use a hard timeout of roughly 2x the baseline run time or the last comparable successful run
 - if the workflow is commit-per-idea, keep only improving commits and discard or revert the rest
+- stop the batch when the chosen batch-level rule is reached
 
 Prefer a simple tab-separated experiment log:
 
@@ -222,6 +226,7 @@ When generating `program.md` from the template:
 - name the mutable file or files explicitly
 - name the fixed evaluation contract explicitly
 - state the exact `uv run ...` command
+- state the chosen batch-level stop rule explicitly
 - state the keep/discard rule in terms of the chosen metric
 - if Agent Smith generated the file, tell the user to customize it before long autonomous runs
 - include git branch and remote expectations when the user has provided them
