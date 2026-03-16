@@ -7,6 +7,12 @@ description: Run R models and visualizations via Docker (rocker/r-ver:latest) wi
 
 Run any R workflow inside a Docker container. No local R installation needed — only Docker.
 
+## Hard Rules
+
+- **Docker is the only way to run R.** Do not install R locally via Homebrew, apt, conda, or any other package manager. Do not use `rpy2`, `pyearth`, `sklearn-contrib-py-earth`, or any Python bridge/reimplementation of an R package.
+- If Docker is not installed or not running, **stop and ask the user to start or install Docker**. Do not fall back to local R installation or Python substitutes.
+- Every R execution goes through `scripts/r_worker.sh` (experiment loop) or `scripts/run_r.sh` (one-off). No exceptions.
+
 Default contract:
 
 - Docker image: `rocker/r-ver:latest`

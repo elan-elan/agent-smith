@@ -16,6 +16,19 @@ Default contract:
 
 Prefer the repo's existing structure over renaming files just to match the default names.
 
+## Non-Python Runtimes (R, Julia, etc.)
+
+The experiment loop is not limited to Python models. When the user requests a model family that lives in another language — such as MARS/earth in R — delegate execution to the appropriate runtime skill.
+
+For **R models**, use the **r-docker** skill. This means:
+
+- Run R code inside Docker via `scripts/r_worker.sh` (experiment loop) or `scripts/run_r.sh` (one-off). The r-docker skill has the full contract.
+- The mutable experiment surface becomes an `.R` script (e.g., `train_earth.R`) instead of `train.py`. Both can coexist — some experiments edit `train.py`, others edit the `.R` script.
+- Metric output must still follow the standard metrics block format so `results.tsv` stays consistent across Python and R experiments.
+- Copy the r-docker helper scripts (`r_worker.sh`, `run_r.sh`) into the repo's `scripts/` directory if they are not already there.
+
+**Hard rule:** never install R locally (`brew install r`, `conda install r-base`, etc.), never use Python-to-R bridges (`rpy2`), and never substitute a Python reimplementation (`pyearth`, `sklearn-contrib-py-earth`) when the user asks for an R package. The r-docker skill exists precisely to avoid these workarounds. If Docker is unavailable, surface the problem and ask the user — do not silently switch strategies.
+
 ## Progressive Disclosure
 
 Read `references/defaults-and-scaffolding.md` before proposing defaults.
