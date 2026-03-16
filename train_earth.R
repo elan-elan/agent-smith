@@ -25,7 +25,7 @@ TEST_FRAC   <- 0.2
 DEGREE      <- 2
 NPRUNE      <- NULL   # NULL = let earth choose
 NFOLD       <- 0      # 0 = no CV; set to e.g. 5 for cross-validated pruning
-THRESH      <- 0.001
+THRESH      <- 0.0001
 MINSPAN     <- 0
 ENDSPAN     <- 0
 FAST_K      <- 20
