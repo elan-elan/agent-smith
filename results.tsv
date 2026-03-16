@@ -1,0 +1,103 @@
+commit	primary_metric	status	description
+aefbeba	0.625464	keep	baseline logistic regression with one-hot preprocessing
+exp-001	0.667145	keep	hgb_fast_regularized lr=0.05 iter=200 leaf=15 minleaf=5 l2=0.1 feat=0.5 bins=128
+exp-002	0.665787	discard	hgb_slow_smoothed lr=0.02 iter=300 leaf=15 minleaf=50 l2=0.0 feat=0.5 bins=32
+exp-003	0.665543	discard	hgb_wide_smoothed lr=0.02 iter=800 leaf=15 minleaf=50 l2=0.0 feat=0.5 bins=64
+exp-004	0.665408	discard	hgb_fast_high_lr lr=0.1 iter=500 leaf=15 minleaf=5 l2=1.0 feat=1.0 bins=32
+exp-005	0.662781	discard	hgb_baseline_boosted lr=0.05 iter=400 leaf=31 minleaf=20 l2=0.0 feat=1.0 bins=255
+exp-006	0.664599	discard	hgb_rand_006 lr=0.015 iter=200 leaf=31 minleaf=10 l2=0.01 feat=0.5 bins=32
+exp-007	0.663041	discard	hgb_rand_007 lr=0.08 iter=200 leaf=7 minleaf=5 l2=0.0 feat=0.5 bins=64
+exp-008	0.664120	discard	hgb_rand_008 lr=0.08 iter=300 leaf=15 minleaf=20 l2=1.0 feat=0.7 bins=32
+exp-009	0.664617	discard	hgb_rand_009 lr=0.05 iter=500 leaf=15 minleaf=10 l2=0.1 feat=0.5 bins=32
+exp-010	0.662919	discard	hgb_rand_010 lr=0.05 iter=500 leaf=7 minleaf=50 l2=0.5 feat=1.0 bins=32
+exp-011	0.664358	discard	hgb_rand_011 lr=0.06 iter=400 leaf=15 minleaf=50 l2=0.0 feat=0.5 bins=64
+exp-012	0.660021	discard	hgb_rand_012 lr=0.08 iter=200 leaf=31 minleaf=20 l2=0.1 feat=0.5 bins=128
+exp-013	0.666219	discard	hgb_rand_013 lr=0.02 iter=400 leaf=15 minleaf=30 l2=0.01 feat=0.5 bins=255
+exp-014	0.662386	discard	hgb_rand_014 lr=0.06 iter=300 leaf=7 minleaf=10 l2=0.0 feat=0.7 bins=255
+exp-015	0.660580	discard	hgb_rand_015 lr=0.04 iter=500 leaf=63 minleaf=20 l2=0.5 feat=0.5 bins=128
+exp-016	0.657617	discard	hgb_rand_016 lr=0.08 iter=400 leaf=63 minleaf=15 l2=0.01 feat=0.5 bins=255
+exp-017	0.659409	discard	hgb_rand_017 lr=0.03 iter=250 leaf=63 minleaf=30 l2=0.0 feat=0.7 bins=255
+exp-018	0.664170	discard	hgb_rand_018 lr=0.015 iter=400 leaf=7 minleaf=50 l2=1.0 feat=0.7 bins=128
+exp-019	0.663841	discard	hgb_rand_019 lr=0.1 iter=250 leaf=7 minleaf=50 l2=0.1 feat=1.0 bins=64
+exp-020	0.663940	discard	hgb_rand_020 lr=0.04 iter=400 leaf=15 minleaf=15 l2=0.01 feat=1.0 bins=32
+exp-021	0.663154	discard	hgb_rand_021 lr=0.02 iter=150 leaf=31 minleaf=15 l2=0.01 feat=0.5 bins=64
+exp-022	0.663834	discard	hgb_rand_022 lr=0.02 iter=900 leaf=15 minleaf=10 l2=0.5 feat=1.0 bins=64
+exp-023	0.662303	discard	hgb_rand_023 lr=0.04 iter=700 leaf=15 minleaf=50 l2=0.1 feat=0.7 bins=128
+exp-024	0.665675	discard	hgb_rand_024 lr=0.04 iter=200 leaf=15 minleaf=5 l2=0.1 feat=0.5 bins=64
+exp-025	0.665285	discard	hgb_rand_025 lr=0.015 iter=200 leaf=15 minleaf=5 l2=0.0 feat=0.7 bins=32
+exp-026	0.662613	discard	hgb_rand_026 lr=0.04 iter=900 leaf=15 minleaf=50 l2=1.0 feat=1.0 bins=255
+exp-027	0.663763	discard	hgb_rand_027 lr=0.02 iter=300 leaf=7 minleaf=50 l2=0.5 feat=0.7 bins=255
+exp-028	0.663727	discard	hgb_rand_028 lr=0.02 iter=150 leaf=7 minleaf=20 l2=0.1 feat=0.5 bins=64
+exp-029	0.659840	discard	hgb_rand_029 lr=0.03 iter=900 leaf=63 minleaf=10 l2=0.1 feat=0.7 bins=64
+exp-030	0.664434	discard	hgb_rand_030 lr=0.015 iter=200 leaf=7 minleaf=5 l2=0.01 feat=0.5 bins=255
+exp-031	0.663686	discard	hgb_rand_031 lr=0.015 iter=700 leaf=15 minleaf=20 l2=0.0 feat=0.7 bins=128
+exp-032	0.663349	discard	hgb_rand_032 lr=0.03 iter=900 leaf=15 minleaf=15 l2=0.01 feat=0.5 bins=32
+exp-033	0.666787	discard	hgb_rand_033 lr=0.1 iter=150 leaf=15 minleaf=5 l2=1.0 feat=0.5 bins=64
+exp-034	0.663718	discard	hgb_rand_034 lr=0.08 iter=300 leaf=7 minleaf=30 l2=0.01 feat=1.0 bins=32
+exp-035	0.663656	discard	hgb_rand_035 lr=0.05 iter=500 leaf=15 minleaf=50 l2=0.1 feat=0.5 bins=128
+exp-036	0.658622	discard	hgb_rand_036 lr=0.1 iter=400 leaf=31 minleaf=5 l2=0.0 feat=0.7 bins=32
+exp-037	0.662442	discard	hgb_rand_037 lr=0.03 iter=400 leaf=31 minleaf=5 l2=0.01 feat=0.7 bins=128
+exp-038	0.663386	discard	hgb_rand_038 lr=0.015 iter=400 leaf=31 minleaf=50 l2=0.0 feat=0.5 bins=128
+exp-039	0.662097	discard	hgb_rand_039 lr=0.05 iter=250 leaf=31 minleaf=30 l2=0.01 feat=1.0 bins=128
+exp-040	0.660225	discard	hgb_rand_040 lr=0.1 iter=400 leaf=31 minleaf=5 l2=0.0 feat=1.0 bins=255
+exp-041	0.661328	discard	hgb_rand_041 lr=0.03 iter=500 leaf=31 minleaf=10 l2=0.5 feat=1.0 bins=255
+exp-042	0.661803	discard	hgb_rand_042 lr=0.03 iter=200 leaf=7 minleaf=15 l2=1.0 feat=1.0 bins=64
+exp-043	0.662316	discard	hgb_rand_043 lr=0.06 iter=400 leaf=7 minleaf=15 l2=0.01 feat=1.0 bins=64
+exp-044	0.666207	discard	hgb_rand_044 lr=0.03 iter=700 leaf=15 minleaf=10 l2=0.01 feat=0.7 bins=32
+exp-045	0.664035	discard	hgb_rand_045 lr=0.04 iter=700 leaf=31 minleaf=10 l2=0.0 feat=0.7 bins=32
+exp-046	0.660273	discard	hgb_rand_046 lr=0.06 iter=900 leaf=31 minleaf=10 l2=0.01 feat=0.5 bins=64
+exp-047	0.663668	discard	hgb_rand_047 lr=0.05 iter=200 leaf=31 minleaf=50 l2=1.0 feat=0.7 bins=128
+exp-048	0.662912	discard	hgb_rand_048 lr=0.05 iter=250 leaf=7 minleaf=5 l2=1.0 feat=0.7 bins=128
+exp-049	0.664921	discard	hgb_rand_049 lr=0.08 iter=200 leaf=15 minleaf=15 l2=0.0 feat=1.0 bins=255
+exp-050	0.656399	discard	hgb_rand_050 lr=0.06 iter=300 leaf=63 minleaf=5 l2=0.1 feat=1.0 bins=128
+exp-051	0.654106	discard	hgb_rand_051 lr=0.05 iter=400 leaf=63 minleaf=15 l2=0.5 feat=1.0 bins=128
+exp-052	0.668878	keep	hgb_rand_052 lr=0.08 iter=700 leaf=15 minleaf=30 l2=1.0 feat=0.7 bins=255
+exp-053	0.658213	discard	hgb_rand_053 lr=0.04 iter=400 leaf=63 minleaf=30 l2=1.0 feat=1.0 bins=128
+exp-054	0.664656	discard	hgb_rand_054 lr=0.1 iter=300 leaf=15 minleaf=50 l2=0.0 feat=0.7 bins=128
+exp-055	0.663416	discard	hgb_rand_055 lr=0.04 iter=400 leaf=15 minleaf=10 l2=0.0 feat=0.5 bins=64
+exp-056	0.665619	discard	hgb_rand_056 lr=0.08 iter=900 leaf=15 minleaf=50 l2=0.5 feat=0.7 bins=255
+exp-057	0.655633	discard	hgb_rand_057 lr=0.02 iter=150 leaf=63 minleaf=10 l2=0.01 feat=1.0 bins=255
+exp-058	0.662199	discard	hgb_rand_058 lr=0.1 iter=200 leaf=15 minleaf=20 l2=1.0 feat=1.0 bins=128
+exp-059	0.665845	discard	hgb_rand_059 lr=0.1 iter=700 leaf=15 minleaf=50 l2=0.5 feat=0.7 bins=128
+exp-060	0.660634	discard	hgb_rand_060 lr=0.04 iter=900 leaf=31 minleaf=20 l2=0.0 feat=1.0 bins=128
+exp-061	0.665964	discard	hgb_rand_061 lr=0.02 iter=500 leaf=15 minleaf=10 l2=0.01 feat=0.7 bins=64
+exp-062	0.660426	discard	hgb_rand_062 lr=0.08 iter=700 leaf=31 minleaf=30 l2=0.5 feat=0.7 bins=32
+exp-063	0.654379	discard	hgb_rand_063 lr=0.08 iter=150 leaf=63 minleaf=5 l2=0.1 feat=0.7 bins=255
+exp-064	0.664139	discard	hgb_rand_064 lr=0.1 iter=300 leaf=15 minleaf=15 l2=0.5 feat=0.7 bins=32
+exp-065	0.658509	discard	hgb_rand_065 lr=0.03 iter=700 leaf=63 minleaf=10 l2=1.0 feat=1.0 bins=32
+exp-066	0.663120	discard	hgb_rand_066 lr=0.02 iter=150 leaf=63 minleaf=10 l2=0.5 feat=0.5 bins=32
+exp-067	0.658634	discard	hgb_rand_067 lr=0.1 iter=300 leaf=31 minleaf=15 l2=0.5 feat=0.7 bins=255
+exp-068	0.662586	discard	hgb_rand_068 lr=0.015 iter=150 leaf=31 minleaf=10 l2=0.0 feat=1.0 bins=32
+exp-069	0.664748	discard	hgb_rand_069 lr=0.03 iter=150 leaf=15 minleaf=10 l2=0.5 feat=1.0 bins=32
+exp-070	0.662993	discard	hgb_rand_070 lr=0.06 iter=400 leaf=15 minleaf=30 l2=1.0 feat=1.0 bins=32
+exp-071	0.656390	discard	hgb_rand_071 lr=0.05 iter=150 leaf=63 minleaf=20 l2=0.01 feat=0.5 bins=64
+exp-072	0.663315	discard	hgb_rand_072 lr=0.015 iter=200 leaf=31 minleaf=30 l2=0.5 feat=1.0 bins=128
+exp-073	0.660905	discard	hgb_rand_073 lr=0.015 iter=500 leaf=63 minleaf=20 l2=0.0 feat=0.7 bins=128
+exp-074	0.662155	discard	hgb_rand_074 lr=0.08 iter=250 leaf=15 minleaf=50 l2=1.0 feat=1.0 bins=128
+exp-075	0.661296	discard	hgb_rand_075 lr=0.08 iter=900 leaf=31 minleaf=15 l2=0.01 feat=0.5 bins=128
+exp-076	0.664123	discard	hgb_rand_076 lr=0.06 iter=700 leaf=7 minleaf=20 l2=0.1 feat=0.5 bins=255
+exp-077	0.664745	discard	hgb_rand_077 lr=0.05 iter=500 leaf=31 minleaf=30 l2=0.0 feat=1.0 bins=64
+exp-078	0.662197	discard	hgb_rand_078 lr=0.1 iter=700 leaf=15 minleaf=50 l2=0.5 feat=1.0 bins=255
+exp-079	0.654090	discard	hgb_rand_079 lr=0.04 iter=400 leaf=63 minleaf=50 l2=0.01 feat=0.7 bins=128
+exp-080	0.660612	discard	hgb_rand_080 lr=0.08 iter=500 leaf=31 minleaf=15 l2=0.5 feat=0.7 bins=128
+exp-081	0.661624	discard	hgb_rand_081 lr=0.06 iter=300 leaf=7 minleaf=50 l2=1.0 feat=1.0 bins=64
+exp-082	0.663336	discard	hgb_rand_082 lr=0.05 iter=900 leaf=31 minleaf=5 l2=0.01 feat=0.7 bins=64
+exp-083	0.661882	discard	hgb_rand_083 lr=0.03 iter=150 leaf=31 minleaf=5 l2=0.0 feat=1.0 bins=128
+exp-084	0.663069	discard	hgb_rand_084 lr=0.02 iter=900 leaf=7 minleaf=30 l2=0.1 feat=0.7 bins=255
+exp-085	0.655963	discard	hgb_rand_085 lr=0.05 iter=150 leaf=63 minleaf=5 l2=0.0 feat=0.7 bins=255
+exp-086	0.665748	discard	hgb_rand_086 lr=0.03 iter=150 leaf=15 minleaf=30 l2=0.1 feat=0.5 bins=64
+exp-087	0.648487	discard	hgb_rand_087 lr=0.08 iter=300 leaf=63 minleaf=20 l2=0.1 feat=1.0 bins=255
+exp-088	0.664957	discard	hgb_rand_088 lr=0.02 iter=150 leaf=15 minleaf=50 l2=0.01 feat=0.7 bins=32
+exp-089	0.663225	discard	hgb_rand_089 lr=0.03 iter=200 leaf=7 minleaf=20 l2=0.5 feat=1.0 bins=255
+exp-090	0.655224	discard	hgb_rand_090 lr=0.05 iter=400 leaf=63 minleaf=5 l2=0.01 feat=0.7 bins=64
+blend-001	0.668984	keep	hgb_rand_052@0.7 + hgb_fast_regularized@0.3
+blend-002	0.669402	keep	hgb_rand_052@0.7 + hgb_rand_033@0.3
+blend-003	0.668606	discard	hgb_rand_052@0.7 + hgb_rand_013@0.3
+blend-004	0.668956	discard	hgb_rand_052@0.7 + hgb_rand_044@0.3
+blend-005	0.667637	discard	hgb_fast_regularized@0.7 + hgb_rand_033@0.3
+blend-006	0.667659	discard	hgb_fast_regularized@0.7 + hgb_rand_013@0.3
+blend-007	0.667456	discard	hgb_fast_regularized@0.7 + hgb_rand_044@0.3
+blend-008	0.667260	discard	hgb_rand_033@0.7 + hgb_rand_013@0.3
+blend-009	0.667155	discard	hgb_rand_033@0.7 + hgb_rand_044@0.3
+blend-010	0.666874	discard	hgb_rand_013@0.7 + hgb_rand_044@0.3
+final-default	0.669402	keep	default train.py ensemble matching blend-002
