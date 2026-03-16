@@ -22,7 +22,7 @@ library(pROC)
 # ── Hyperparameters (EDIT THESE) ─────────────────────────────────────
 SEED        <- 42
 TEST_FRAC   <- 0.2
-DEGREE      <- 2
+DEGREE      <- 3
 NPRUNE      <- NULL   # NULL = let earth choose
 NFOLD       <- 0      # 0 = no CV; set to e.g. 5 for cross-validated pruning
 THRESH      <- 0.0001
