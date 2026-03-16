@@ -8,7 +8,8 @@ This repository is intended to become a hub for agent skills related to machine 
 
 For now, it includes:
 
-- the base `agent-smith` skill in [`.agents/skills/agent-smith/`](/Users/yirending/code/autotuning/.agents/skills/agent-smith/SKILL.md)
+- the base `agent-smith` skill in [`.agents/skills/agent-smith/`](.agents/skills/agent-smith/SKILL.md)
+- the `r-docker` skill in [`.agents/skills/r-docker/`](.agents/skills/r-docker/SKILL.md)
 - a small working demo project for tabular binary classification on the Kaggle insurance claims dataset
 
 The longer-term goal is to grow this repository into a collection of reusable skills for different ML and experimentation tasks, while keeping concrete example projects here for testing and demos.
@@ -27,6 +28,18 @@ This work is inspired by [`autoresearch`](https://github.com/karpathy/autoresear
 - standardize Python package management around `uv`
 - support experiment logging, branch-based iteration, and post-run summarization
 - generalize across different problem types as long as the workflow produces a metric
+
+## R-Docker Skill
+
+`r-docker` runs R models and visualizations via Docker (`rocker/r-ver:latest`) without a local R installation. See [`.agents/skills/r-docker/SKILL.md`](.agents/skills/r-docker/SKILL.md).
+
+- fits any R model (earth/MARS, glm, gam, randomForest, svm, xgboost) inside a disposable Docker container
+- accepts CSV input; auto-converts `.npy`, `.parquet`, `.tsv`, `.json`, `.xlsx`
+- two execution modes:
+  - **one-off** (`scripts/run_r.sh`): `docker run --rm` with a package cache volume
+  - **experiment loop** (`scripts/r_worker.sh`): persistent container with packages installed once, fast `docker exec` per run
+- integrates with `agent-smith`: the `.R` script becomes the mutable experiment surface, tuned via the same edit → run → commit/revert cycle
+- includes templates for earth, glm, ggplot2, and a generic skeleton
 
 ## Current Demo Project
 
