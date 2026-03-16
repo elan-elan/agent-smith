@@ -81,14 +81,20 @@ Use `keep`, `discard`, or `crash` for status unless the repo already has a diffe
 
 ## Loop
 
+The agent itself drives each iteration. Do not write batch runners or meta-scripts.
+
 Repeat:
 
-1. inspect the current repo state
-2. make one experiment-sized change
-3. run the training command
-4. read the final metric block
-5. record the result
-6. keep or discard the change based on whether it improved `val_auc`
+1. review what has worked so far — which models, hyperparameters, and strategies improved the metric?
+2. choose the next experiment idea based on that analysis
+3. edit `train.py` directly — the code change IS the experiment
+4. run the training command: `uv run train.py 2>&1 | tee run.log`
+5. read the final metric block from `run.log`
+6. record the result in `results.tsv`
+7. **if improved**: commit `train.py` immediately (`git add train.py && git commit -m "description val_auc=X.XXXXXX"`)
+8. **if not improved**: revert `train.py` to the last committed state (`git checkout train.py`)
+
+The committed state of `train.py` should always reflect the current best configuration. Never start a new experiment with a non-improving change still in the working tree.
 
 ## Guardrails
 

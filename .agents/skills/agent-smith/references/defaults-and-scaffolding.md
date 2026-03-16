@@ -103,6 +103,11 @@ Use these defaults unless the user wants a different cadence:
 
 - run the baseline first on a fresh branch before modifying code
 - make one experiment-sized change per run
+- the agent drives the loop directly — do not create batch runners, experiment scripts, or meta-harnesses that pre-generate and execute configurations; each iteration is an edit→run→evaluate→decide cycle performed by the agent
+- each experiment is a direct edit to the mutable file (typically `train.py`), not a config passed to a generic runner
+- after running, compare the result to the current best metric
+- if the metric improved, commit the mutable file immediately; the committed state should always reflect the current best
+- if the metric did not improve, revert the mutable file to the last committed state before starting the next experiment (`git checkout <file>`)
 - infer per-run runtime expectations from the baseline or from recent comparable successful runs
 - redirect command output to `run.log`
 - read the final summary block from `run.log` rather than streaming full output
@@ -110,8 +115,18 @@ Use these defaults unless the user wants a different cadence:
 - if the error is trivial, fix and rerun
 - if the idea is broken or the run keeps crashing, log `crash` and move on
 - use a hard timeout of roughly 2x the baseline run time or the last comparable successful run
-- if the workflow is commit-per-idea, keep only improving commits and discard or revert the rest
 - stop the batch when the chosen batch-level rule is reached
+
+### Adaptive decision-making
+
+Do not plan all experiments in advance. After each run (or every few runs), reflect on the results so far:
+
+- which model families or architectures scored highest?
+- which hyperparameter directions are trending better?
+- which strategies (e.g., upsampling methods, regularization) helped vs. hurt?
+- are there diminishing returns — should the agent switch to a different approach?
+
+Use these patterns to choose the next experiment. Favor exploitation of promising directions while periodically exploring new ones. This informed iteration is the primary advantage of agent-driven experimentation over grid search.
 
 Prefer a simple tab-separated experiment log:
 
