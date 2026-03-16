@@ -103,6 +103,35 @@ Default loop unless the user explicitly wants a different process:
 - keep improving changes and discard non-improving ones when the workflow supports it
 - prefer simpler changes when gains are similar
 
+### The agent IS the loop
+
+Do not write batch automation scripts, meta-runners, or experiment harnesses that pre-generate configurations and run them all. The agent itself drives each iteration: edit the mutable file, run the command, read the result, decide what to try next. This is the core value of the loop — each experiment is informed by every previous result.
+
+### Edit → Run → Commit/Revert cycle
+
+Each experiment follows this exact sequence:
+
+1. **Choose** the next experiment idea based on what has and has not worked so far
+2. **Edit** the mutable file(s) (typically `train.py`) directly — the edit IS the experiment
+3. **Run** the training command and redirect output to `run.log`
+4. **Read** the final metric block from `run.log`
+5. **Record** the result in `results.tsv`
+6. **If improved**: commit the changed file(s) immediately with a descriptive message including the new metric
+7. **If not improved**: revert the file(s) to the last committed state (`git checkout <file>`) before starting the next experiment
+
+Never let a non-improving change persist in the working tree when starting the next experiment. The committed state of the mutable file should always reflect the current best.
+
+### Adaptive experimentation
+
+Do not pre-plan all experiments upfront. After every few runs, review what patterns are emerging:
+
+- Which model families score highest?
+- Which hyperparameter ranges are most promising?
+- Which upsampling strategies help vs. hurt?
+- Are there diminishing returns in the current direction?
+
+Use these observations to focus subsequent experiments on the most promising region of the search space. Abandon directions that consistently underperform. Double down on directions that show gains.
+
 Do not require a fixed per-run budget. Infer runtime expectations from the baseline or recent comparable successful runs, and use that to set hard timeouts.
 
 If the final metric block is missing, inspect `run.log`, attempt an easy fix, and otherwise record a crash. If autonomous mode is requested, continue until interrupted or until the chosen batch-level stop rule is reached.
