@@ -12,11 +12,11 @@ from pathlib import Path
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from xgboost import XGBClassifier
 
 
 PREPARED_DATA_PATH = Path("data/prepared/insurance_claims_prepared.csv")
@@ -37,7 +37,7 @@ def load_data() -> tuple[pd.DataFrame, pd.Series]:
     return X, y
 
 
-def build_model(X: pd.DataFrame) -> Pipeline:
+def build_model(X: pd.DataFrame, y: pd.Series) -> Pipeline:
     numeric_cols = X.select_dtypes(include=["number", "bool"]).columns.tolist()
     categorical_cols = [col for col in X.columns if col not in numeric_cols]
 
@@ -73,11 +73,14 @@ def build_model(X: pd.DataFrame) -> Pipeline:
         remainder="drop",
     )
 
-    classifier = LogisticRegression(
-        max_iter=MAX_ITER,
-        solver="saga",
-        class_weight="balanced",
+    classifier = XGBClassifier(
+        n_estimators=200,
+        max_depth=6,
+        learning_rate=0.1,
+        scale_pos_weight=(y == 0).sum() / max((y == 1).sum(), 1),
         random_state=RANDOM_SEED,
+        n_jobs=-1,
+        eval_metric="auc",
     )
 
     return Pipeline(
@@ -99,7 +102,7 @@ def main() -> None:
         stratify=y,
     )
 
-    model = build_model(X_train)
+    model = build_model(X_train, y_train)
 
     fit_start = time.time()
     model.fit(X_train, y_train)
