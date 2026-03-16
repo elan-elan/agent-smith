@@ -77,6 +77,8 @@ def build_model(X: pd.DataFrame, y: pd.Series) -> Pipeline:
         n_estimators=400,
         max_depth=3,
         learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
         scale_pos_weight=(y == 0).sum() / max((y == 1).sum(), 1),
         random_state=RANDOM_SEED,
         n_jobs=-1,
