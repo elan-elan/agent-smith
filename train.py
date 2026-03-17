@@ -89,7 +89,7 @@ def build_model(X: pd.DataFrame, y: pd.Series) -> Pipeline:
     )
     et = ExtraTreesClassifier(
         n_estimators=1000,
-        max_depth=12,
+        max_depth=11,
         random_state=RANDOM_SEED,
         n_jobs=-1,
     )
