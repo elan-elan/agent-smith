@@ -16,6 +16,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.ensemble import ExtraTreesClassifier, VotingClassifier
 from xgboost import XGBClassifier
 
 
@@ -73,8 +74,8 @@ def build_model(X: pd.DataFrame, y: pd.Series) -> Pipeline:
         remainder="drop",
     )
 
-    classifier = XGBClassifier(
-        n_estimators=2000,
+    xgb = XGBClassifier(
+        n_estimators=500,
         max_depth=3,
         learning_rate=0.02,
         subsample=0.7,
@@ -85,7 +86,16 @@ def build_model(X: pd.DataFrame, y: pd.Series) -> Pipeline:
         random_state=RANDOM_SEED,
         n_jobs=-1,
         eval_metric="auc",
-        early_stopping_rounds=50,
+    )
+    et = ExtraTreesClassifier(
+        n_estimators=500,
+        max_depth=10,
+        random_state=RANDOM_SEED,
+        n_jobs=-1,
+    )
+    classifier = VotingClassifier(
+        estimators=[("xgb", xgb), ("et", et)],
+        voting="soft",
     )
 
     return Pipeline(
@@ -109,17 +119,13 @@ def main() -> None:
 
     model = build_model(X_train, y_train)
 
-    # Preprocess for eval_set
+    # Preprocess
     preprocess = model.named_steps["preprocess"]
     X_train_t = preprocess.fit_transform(X_train)
     X_val_t = preprocess.transform(X_val)
 
     fit_start = time.time()
-    model.named_steps["model"].fit(
-        X_train_t, y_train,
-        eval_set=[(X_val_t, y_val)],
-        verbose=False,
-    )
+    model.named_steps["model"].fit(X_train_t, y_train)
     fit_end = time.time()
 
     val_probs = model.named_steps["model"].predict_proba(X_val_t)[:, 1]
