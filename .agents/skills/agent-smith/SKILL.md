@@ -28,7 +28,7 @@ Read [references/defaults-and-scaffolding.md](./references/defaults-and-scaffold
 
 **Intake**: Inspect the repo, infer defaults, then confirm in one short message: prep entrypoint, training entrypoint, instructions file, metric contract, batch-level stop rule, and git tracking preference. See the reference for exact prompts and follow-up questions.
 
-**Setup checklist**: resolve paths → ensure `uv` → inspect/create `pyproject.toml` → initialize `results.tsv` → scaffold missing files (only after user confirmation) → summarize the experiment contract.
+**Setup checklist**: resolve paths → for each of the three core files (`prepare.py`, `train.py`, `program.md` or their resolved equivalents): if it exists, **read it**; if it does not exist, **scaffold it** from `assets/` templates adapted to the user's prompt, then read it → ensure `uv` → inspect/create `pyproject.toml` → **create experiment branch** (if on `main`/`master`, branch to `experiments/<tag>` before any commits) → initialize `results.tsv` → summarize the experiment contract.
 
 **Scaffolding**: use the bundled `assets/` templates. Keep files small, prefer existing libraries, make output end with a machine-readable summary block.
 
