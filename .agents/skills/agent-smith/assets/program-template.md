@@ -81,10 +81,13 @@ grep "^primary_metric:\|^status:" run.log
 Record experiments in `results.tsv` using tab-separated fields:
 
 ```text
-commit	primary_metric	status	description
+experiment	{{metric_name}}	status	description
 ```
 
-Use `keep`, `discard`, or `crash` for status unless the repo already has a different convention. Leave `results.tsv` untracked unless the user explicitly wants it committed.
+- **experiment**: sequential integer starting at 1
+- **status**: one of `keep`, `discard`, or `crash`
+
+Append one row immediately after each experiment — never batch or defer. Commit `results.tsv` as part of the post-batch wrap-up.
 
 ## Loop
 
@@ -93,12 +96,12 @@ Repeat:
 1. inspect the current repo state
 2. if this branch has no baseline result yet, run the baseline as-is and record it
 3. otherwise make one experiment-sized change
-4. if git tracking is enabled, commit the experiment
-5. run the training command as `{{train_command}} > run.log 2>&1` and do not use `tee`
-6. read the final metric block from `run.log`
-7. if the final metric block is missing, inspect `tail -n 50 run.log`, attempt an easy fix, and otherwise record a crash
-8. record the result in `results.tsv`
-9. keep or discard the change based on whether it improved `{{metric_name}}`
+4. run the training command as `{{train_command}} 2>&1 | tee run.log`
+5. read the final metric block from `run.log`
+6. if the final metric block is missing, inspect `tail -n 50 run.log`, attempt an easy fix, and otherwise record a crash
+7. **immediately** record the result in `results.tsv` via a single `printf` line — before committing, reverting, or planning the next experiment
+8. **if improved**: commit the mutable file(s) and `results.tsv` together
+9. **if not improved**: revert the mutable file(s) (`git checkout <file>`) and commit `results.tsv` separately
 10. stop when the batch-level stop rule above has been reached
 
 ## Guardrails

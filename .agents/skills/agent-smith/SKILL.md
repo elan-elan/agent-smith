@@ -16,185 +16,102 @@ Default contract:
 
 Prefer the repo's existing structure over renaming files just to match the default names.
 
-## Non-Python Runtimes (R, Julia, etc.)
+## Non-Python Runtimes
 
-The experiment loop is not limited to Python models. When the user requests a model family that lives in another language — such as MARS/earth in R — delegate execution to the appropriate runtime skill.
+The experiment loop is not limited to Python. The same edit → run → commit/revert cycle and `results.tsv` tracking apply regardless of language.
 
-### R Models (via r-docker skill)
+- **R models**: use the **r-docker** skill. Read its `SKILL.md` and `references/r-model-cookbook.md` before writing any R code.
 
-**Before writing any R code**, read the r-docker skill's `references/r-model-cookbook.md`. It contains the correct API for every model, known pitfalls, and runtime expectations.
+## Setup
 
-#### Setup
+Read [references/defaults-and-scaffolding.md](./references/defaults-and-scaffolding.md) before proposing defaults. It contains candidate path order, intake prompts, scaffold heuristics, git workflow, and `program.md` adaptation rules.
 
-1. Copy `r_worker.sh` and `run_r.sh` from the r-docker skill's `scripts/` into the repo's `scripts/` directory.
-2. Copy `assets/r-template-tabular-classification.R` from the r-docker skill to `train.R` in the project root. This is the mutable experiment surface for R — analogous to `train.py`.
-3. Edit the CONFIG section in `train.R` (DATA_FILE, TARGET_COL, MODEL_TYPE, etc.) for the dataset.
-4. Start the worker with **all common packages** pre-installed:
-   ```bash
-   bash scripts/r_worker.sh start data/prepared r_output -- pROC earth randomForest ranger xgboost glmnet e1071
-   ```
-5. Run baseline and record in `results.tsv`.
+**Intake**: Inspect the repo, infer defaults, then confirm in one short message: prep entrypoint, training entrypoint, instructions file, metric contract, batch-level stop rule, and git tracking preference. See the reference for exact prompts and follow-up questions.
 
-#### Mutable file
+**Setup checklist**: resolve paths → ensure `uv` → inspect/create `pyproject.toml` → initialize `results.tsv` → scaffold missing files (only after user confirmation) → summarize the experiment contract.
 
-The mutable file is **`train.R`** (generic name). Do not use model-specific names like `train_earth.R` — the whole point is to switch models by editing the CONFIG section.
+**Scaffolding**: use the bundled `assets/` templates. Keep files small, prefer existing libraries, make output end with a machine-readable summary block.
 
-Both `train.py` and `train.R` can coexist. Some experiments edit `train.py`, others edit `train.R`. Use `results.tsv` to track all results regardless of language.
-
-#### Experiment loop cycle
-
-Same edit → run → commit/revert pattern as Python:
-
-1. **Edit** `train.R` — change MODEL_TYPE, hyperparameters, preprocessing
-2. **Commit** the change
-3. **Run** `bash scripts/r_worker.sh run train.R 300 2>&1 | tee run.log`
-4. **Read** metrics from `run.log`
-5. **Record** in `results.tsv`
-6. **Keep or revert** based on metric improvement
-
-#### Package management
-
-- Install all packages at worker startup (see standard set above)
-- **Never** call `install.packages()` inside `train.R`
-- If a new package is needed mid-loop: `bash scripts/r_worker.sh install <pkg>`
-
-#### Teardown
-
-```bash
-bash scripts/r_worker.sh stop
-```
-
-#### Hard rules
-
-- **Never install R locally** (`brew install r`, `conda install r-base`, etc.)
-- **Never use Python-to-R bridges** (`rpy2`)
-- **Never substitute Python reimplementations** (`pyearth`, `sklearn-contrib-py-earth`) when the user asks for an R package
-- If Docker is unavailable, surface the problem and ask the user — do not silently switch strategies
-
-## Progressive Disclosure
-
-Read `references/defaults-and-scaffolding.md` before proposing defaults.
-
-Load it when you need:
-
-- candidate path order
-- exact intake prompts
-- scaffold heuristics
-- git defaults
-- package-management details
-- `program.md` adaptation rules
-
-## Interactive Intake
-
-Inspect the repo first, then ask one short confirmation message with inferred defaults. Keep the first round minimal and ask follow-ups only when they unblock scaffolding.
-
-Confirm:
-
-1. the prep entrypoint
-2. the training entrypoint
-3. the instructions file
-4. the metric contract
-5. one batch-level stop rule, if the user has not already provided one
-6. the git tracking preference
-
-If remote tracking is desired, ask for the repository URL. If the repo already has commits on `main`, `master`, or another stable branch, default to creating a separate experiment branch first.
-
-If `prepare.py`, `train.py`, or `program.md` is missing, ask one-by-one whether to create it from scratch. If Agent Smith creates `program.md`, remind the user to customize it before any long autonomous run.
-
-## Setup Workflow
-
-1. resolve the prep, train, and instructions paths
-2. ensure `uv` is available on `PATH`; if not, install it and verify `uv --version`
-3. inspect or create `pyproject.toml` from `assets/pyproject-template.toml`
-4. standardize Python commands around `uv run`
-5. when a new dependency is required, add it with `uv add <package>`
-6. if installation or dependency changes are blocked by sandbox or network policy, surface the exact command and request approval
-7. inspect git state and confirm whether changes stay local or should also be pushed to a remote
-8. if the repo already has a committed baseline on a stable branch, create a dedicated experiment branch before autotuning
-9. initialize `results.tsv` if it does not already exist
-10. scaffold missing files only after inspection and user confirmation
-11. summarize the final experiment contract before running
-
-Leave the repo with:
-
-- resolved entrypoints
-- a runnable baseline command
-- a clear metric contract
-- a clear batch-level stop condition
-- a clear git plan
-- a baseline result recorded before aggressive experimentation begins
-
-## Scaffolding
-
-When creating missing files:
-
-- keep the first version small and easy to edit
-- prefer the repo's existing libraries and conventions
-- make training output end with a machine-readable summary block
-- keep tunable knobs obvious
-- keep the baseline deterministic enough for A/B comparison
-- use `uv run` in commands and generated instructions
-
-Use the bundled assets:
-
-- `assets/prepare-template.py`
-- `assets/train-template-generic.py`
-- `assets/train-template-tabular.py`
-- `assets/program-template.md`
-- `assets/pyproject-template.toml`
-
-If the user provides only data or a download script, synthesize the smallest justified baseline. Use the tabular template for CSV or dataframe-style tasks when it fits.
-
-## Experiment Loop Contract
-
-Default loop unless the user explicitly wants a different process:
-
-- run the baseline first on a fresh experiment branch
-- make one experiment-sized change at a time
-- commit each experiment separately when git tracking is enabled
-- redirect full output to `run.log`
-- read the final metric block from `run.log`
-- record every run in `results.tsv`
-- keep improving changes and discard non-improving ones when the workflow supports it
-- prefer simpler changes when gains are similar
+## Experiment Loop
 
 ### The agent IS the loop
 
-Do not write batch automation scripts, meta-runners, or experiment harnesses that pre-generate configurations and run them all. The agent itself drives each iteration: edit the mutable file, run the command, read the result, decide what to try next. This is the core value of the loop — each experiment is informed by every previous result.
+Do not write batch automation scripts, meta-runners, or experiment harnesses. The agent itself drives each iteration: edit, run, read, decide. Each experiment is informed by every previous result.
 
-### Edit → Run → Commit/Revert cycle
+### Edit → Run → Record → Commit/Revert
 
 Each experiment follows this exact sequence:
 
-1. **Choose** the next experiment idea based on what has and has not worked so far
-2. **Edit** the mutable file(s) (typically `train.py`) directly — the edit IS the experiment
-3. **Run** the training command and redirect output to `run.log`
-4. **Read** the final metric block from `run.log`
-5. **Record** the result in `results.tsv`
-6. **If improved**: commit the changed file(s) immediately with a descriptive message including the new metric
-7. **If not improved**: revert the file(s) to the last committed state (`git checkout <file>`) before starting the next experiment
+1. **Edit** the mutable file — the code change IS the experiment
+2. **Run** the training command: `uv run train.py 2>&1 | tee run.log`
+3. **Read** the final metric block from `run.log`
+4. **Record** the result in `results.tsv` — **immediately** (see Hard Rules §1 below)
+5. **If improved**: commit the mutable file(s) and `results.tsv` together
+6. **If not improved**: revert the mutable file(s) (`git checkout <file>`) and commit `results.tsv` separately so the discard row is preserved
 
-Never let a non-improving change persist in the working tree when starting the next experiment. The committed state of the mutable file should always reflect the current best.
+The committed mutable file should always reflect the current best.
+
+### `results.tsv` format
+
+```text
+experiment	<metric_column>	status	description
+```
+
+- **experiment**: sequential integer starting at 1
+- **status**: one of `keep`, `discard`, or `crash` (the bundled `summarize_results.py` depends on these exact values)
+- Leave the metric cell empty for crash/invalid runs
 
 ### Adaptive experimentation
 
-Do not pre-plan all experiments upfront. After every few runs, review what patterns are emerging:
+Do not pre-plan all experiments. After every few runs, review emerging patterns and focus on the most promising directions. Abandon directions that consistently underperform.
 
-- Which model families score highest?
-- Which hyperparameter ranges are most promising?
-- Which upsampling strategies help vs. hurt?
-- Are there diminishing returns in the current direction?
+**Pruning heuristic**: when a new direction scores >1.5% absolute worse than current best, one or two probes is enough — move on.
 
-Use these observations to focus subsequent experiments on the most promising region of the search space. Abandon directions that consistently underperform. Double down on directions that show gains.
+See [references/defaults-and-scaffolding.md](./references/defaults-and-scaffolding.md) for full adaptive decision-making guidance.
 
-Do not require a fixed per-run budget. Infer runtime expectations from the baseline or recent comparable successful runs, and use that to set hard timeouts.
+## Hard Rules
 
-If the final metric block is missing, inspect `run.log`, attempt an easy fix, and otherwise record a crash. If autonomous mode is requested, continue until interrupted or until the chosen batch-level stop rule is reached.
+These rules exist because violating them caused real data-loss and workflow failures:
 
-After a completed batch, run `scripts/summarize_results.py` on `results.tsv` to generate `results_summary.md` and `progress.svg`.
+### 1. Record `results.tsv` immediately after each experiment
+
+Append one row via `printf` right after reading the result — before committing, reverting, or planning the next experiment.
+
+```bash
+printf '%s\t%s\t%s\t%s\n' "<N>" "<metric>" "<status>" "<description>" >> results.tsv
+tail -1 results.tsv   # sanity check
+```
+
+**Prohibited**: bulk-appending multiple rows, heredocs with many lines, or reconstructing results from memory. These corrupt the terminal or lose data.
+
+### 2. Keep the working tree clean
+
+- **No throwaway scripts** in the repo. Use `python -c '...'` for one-off analysis.
+- **No large terminal operations** (multi-line heredocs, long echo chains). Keep commands short and atomic.
+- **Verify periodically**: `git status` should show only committed files + at most an uncommitted `results.tsv` update.
+
+### 3. Never start an experiment with stale state
+
+A non-improving change must be reverted before the next experiment begins.
+
+## Post-Batch Wrap-Up
+
+Perform these steps **automatically** when the batch is complete:
+
+1. **Verify best state**: rerun training on committed code to confirm the metric is reproducible
+2. **Verify `results.tsv` integrity**: `wc -l results.tsv` should equal N + 1 (header + experiments)
+3. **Run the summary script**:
+   ```bash
+   uv run python .agents/skills/agent-smith/scripts/summarize_results.py results.tsv
+   ```
+   Adjust `--goal lower` when lower metrics are better.
+4. **Commit artifacts**: `git add -f results.tsv results_summary.md progress.svg && git commit -m "..."`
+5. **Clean up**: remove any stray files, verify with `git status`
+6. **Report**: total experiments, kept/discarded/crash counts, baseline → best metric, improvement
 
 ## Resources
 
-- Read `references/defaults-and-scaffolding.md` for detailed heuristics, prompt wording, and template adaptation rules.
-- Run `scripts/summarize_results.py` after completed experiment batches.
-- Adapt the files in `assets/` instead of recreating common scaffolds from scratch.
+- [references/defaults-and-scaffolding.md](./references/defaults-and-scaffolding.md) — detailed heuristics, prompts, template adaptation rules, git workflow, experiment loop defaults
+- `scripts/summarize_results.py` — generates `results_summary.md` and `progress.svg` from `results.tsv`
+- `assets/` — templates for `prepare.py`, `train.py`, `program.md`, `pyproject.toml`
+- `assets/feature-importances-template.py` — inspect feature importances from an sklearn ColumnTransformer + tree model pipeline; run directly instead of creating throwaway scripts

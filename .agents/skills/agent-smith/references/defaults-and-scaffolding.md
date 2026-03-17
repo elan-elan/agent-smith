@@ -106,8 +106,8 @@ Use these defaults unless the user wants a different cadence:
 - the agent drives the loop directly — do not create batch runners, experiment scripts, or meta-harnesses that pre-generate and execute configurations; each iteration is an edit→run→evaluate→decide cycle performed by the agent
 - each experiment is a direct edit to the mutable file (typically `train.py`), not a config passed to a generic runner
 - after running, compare the result to the current best metric
-- if the metric improved, commit the mutable file immediately; the committed state should always reflect the current best
-- if the metric did not improve, revert the mutable file to the last committed state before starting the next experiment (`git checkout <file>`)
+- if the metric improved, commit the mutable file and `results.tsv` together immediately; the committed state should always reflect the current best
+- if the metric did not improve, revert the mutable file to the last committed state before starting the next experiment (`git checkout <file>`) and commit `results.tsv` separately so the discard row is preserved
 - infer per-run runtime expectations from the baseline or from recent comparable successful runs
 - redirect command output to `run.log`
 - read the final summary block from `run.log` rather than streaming full output
@@ -116,6 +116,28 @@ Use these defaults unless the user wants a different cadence:
 - if the idea is broken or the run keeps crashing, log `crash` and move on
 - use a hard timeout of roughly 2x the baseline run time or the last comparable successful run
 - stop the batch when the chosen batch-level rule is reached
+
+### Incremental `results.tsv` recording
+
+**Hard rule.** Append one row to `results.tsv` immediately after reading each experiment's result — before committing, reverting, or planning the next experiment. Never defer recording to the end of a batch.
+
+Use a single `printf` line to append:
+
+```bash
+printf '%s\t%s\t%s\t%s\n' "<N>" "<metric>" "<status>" "<description>" >> results.tsv
+```
+
+**Prohibited**: bulk-appending multiple rows at once, heredocs (`<< EOF`) with many lines, or reconstructing results from memory after the fact. Large heredocs can corrupt the terminal session. Reconstructing from memory risks data loss.
+
+After appending, sanity-check: `tail -1 results.tsv`
+
+If the file gets out of sync, fix it immediately with a single `printf` append before continuing.
+
+### Working tree hygiene
+
+- **No throwaway scripts**: do not create temporary utility scripts (e.g., `check_importances.py`) in the repo during the loop. Use inline terminal commands (`python -c '...'`) for one-off analysis.
+- **No large terminal operations**: avoid heredocs with dozens of lines or long `echo` chains. These corrupt the terminal session. Keep commands short and atomic.
+- **Clean tree between experiments**: before each experiment, the working tree should contain only committed files plus at most an uncommitted `results.tsv` update. Run `git status` periodically to verify.
 
 ### Adaptive decision-making
 
@@ -128,13 +150,19 @@ Do not plan all experiments in advance. After each run (or every few runs), refl
 
 Use these patterns to choose the next experiment. Favor exploitation of promising directions while periodically exploring new ones. This informed iteration is the primary advantage of agent-driven experimentation over grid search.
 
+**Pruning heuristic**: when a new model family or major direction scores substantially worse than the current best (e.g., >1.5% absolute metric gap), do not invest additional experiments tuning it. One or two probes are enough to establish that a direction is unpromising. Move on.
+
 Prefer a simple tab-separated experiment log:
 
 ```text
-commit	primary_metric	status	description
+experiment	<metric_column>	status	description
 ```
 
-Initialize `results.tsv` with just the header row before the first baseline run. Use `keep`, `discard`, or `crash` for status. Leave `results.tsv` untracked by git unless the user explicitly wants it committed.
+- **experiment**: sequential integer starting at 1
+- **metric column**: matches the metric name from the training output (e.g., `val_auc`, `val_loss`, `primary_metric`)
+- **status**: one of `keep`, `discard`, or `crash` (the bundled `summarize_results.py` depends on these exact values)
+
+Initialize `results.tsv` with just the header row before the first baseline run. Commit `results.tsv` as part of the post-batch wrap-up.
 
 ## Post-run summarization
 

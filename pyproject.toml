@@ -5,11 +5,8 @@ description = "Agent Smith experiment loop for Kaggle insurance claims binary cl
 readme = "program.md"
 requires-python = ">=3.10"
 dependencies = [
-    "imbalanced-learn>=0.14.1",
     "kagglehub>=1.0.0",
-    "lightgbm>=4.6.0",
     "pandas>=2.3.3",
     "pyyaml>=6.0.3",
     "scikit-learn>=1.7.2",
-    "xgboost>=3.2.0",
 ]
