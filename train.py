@@ -88,7 +88,7 @@ def build_model(X: pd.DataFrame, y: pd.Series) -> Pipeline:
         eval_metric="auc",
     )
     et = ExtraTreesClassifier(
-        n_estimators=500,
+        n_estimators=1000,
         max_depth=10,
         random_state=RANDOM_SEED,
         n_jobs=-1,
