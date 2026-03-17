@@ -1,7 +1,7 @@
 # Agent Smith
 
 <p align="center">
-  <img src="data/progress.svg" alt="Experiment progress" width="720" />
+  <img src="data/progress.svg" alt="Experiment progress" />
 </p>
 
 This repository is intended to become a hub for agent skills related to machine learning, experimentation, and automated tuning workflows.
