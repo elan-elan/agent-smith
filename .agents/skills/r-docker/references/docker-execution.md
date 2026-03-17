@@ -48,13 +48,18 @@ Use `scripts/csv_convert.py` for automated detection and conversion. Clean up te
 
 Every generated R script must:
 
-1. **Install required packages** at the top (idempotent):
-   ```r
-   for (pkg in c("earth", "e1071")) {
-     if (!requireNamespace(pkg, quietly = TRUE))
-       install.packages(pkg, repos = "https://cloud.r-project.org", quiet = TRUE)
-   }
-   ```
+1. **Handle packages correctly** based on execution mode:
+   - **One-off mode** (`run_r.sh`): include idempotent `install.packages()` at the top (the package cache volume avoids recompilation):
+     ```r
+     for (pkg in c("earth", "e1071")) {
+       if (!requireNamespace(pkg, quietly = TRUE))
+         install.packages(pkg, repos = "https://cloud.r-project.org", quiet = TRUE)
+     }
+     ```
+   - **Experiment loop mode** (`r_worker.sh`): do NOT call `install.packages()`. Packages are pre-installed at worker startup. Use only:
+     ```r
+     suppressPackageStartupMessages(library(earth))
+     ```
 
 2. **Accept the data directory as a command-line argument**:
    ```r
@@ -184,14 +189,12 @@ When the user provides requirements (split, evaluation criteria, hyperparameters
 
 ## Workflow: Experiment Loop (Agent-Smith)
 
-1. Inspect data, confirm metric contract and stop rule
-2. Convert to CSV if needed
-3. Generate the initial R script (baseline)
-4. Start the worker: `bash scripts/r_worker.sh start <data_dir> <output_dir> -- <packages>`
-5. Record baseline: run, extract metrics, record in `results.tsv`, commit
-6. Loop (edit → run → record → keep/revert) per agent-smith rules
-7. Stop the worker: `bash scripts/r_worker.sh stop`
-8. Summarize: run `summarize_results.py`
+The full setup, experiment cycle, teardown, and mid-loop package install steps are defined in the SKILL.md "Integration with Agent Smith" section. Follow those steps — they are the canonical source.
+
+Additional details specific to Docker execution:
+- The worker's data mount is read-only; output mount is read-write
+- `docker cp` is used internally by `r_worker.sh run` to copy the script in before each execution
+- Package installation via `r_worker.sh install` runs inside the existing container — no restart needed
 
 ## Hybrid: R Model inside train.py
 

@@ -1,6 +1,6 @@
 ---
 name: agent-smith
-description: Create or adapt lightweight experiment harnesses for machine learning, data, and iterative optimization repos. Use when Codex needs to inspect or scaffold a `prepare.py` / `train.py` / `program.md` style workflow, standardize Python execution with `uv`, set up git-safe experimentation, and run repeatable keep-or-discard experiment loops with logged results.
+description: Create or adapt lightweight experiment harnesses for machine learning, data, and iterative optimization repos. Use when the agent needs to inspect or scaffold a `prepare.py` / `train.py` / `program.md` style workflow, standardize Python execution with `uv`, set up git-safe experimentation, and run repeatable keep-or-discard experiment loops with logged results. Make sure to use this skill whenever the user mentions experiment loops, hyperparameter tuning, autotuning, ML iteration, train/eval cycles, setting up reproducible experiments, or wants to systematically optimize a model — even if they don't explicitly say "agent smith".
 ---
 
 # Agent Smith
@@ -82,7 +82,7 @@ printf '%s\t%s\t%s\t%s\n' "<N>" "<metric>" "<status>" "<description>" >> results
 tail -1 results.tsv   # sanity check
 ```
 
-**Prohibited**: bulk-appending multiple rows, heredocs with many lines, or reconstructing results from memory. These corrupt the terminal or lose data.
+Bulk-appending multiple rows, heredocs with many lines, and reconstructing results from memory have all caused real data loss — avoid them.
 
 ### 2. Keep the working tree clean
 

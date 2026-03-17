@@ -1,6 +1,6 @@
 ---
 name: r-docker
-description: Run R models and visualizations via Docker (rocker/r-ver:latest) without requiring a local R installation. Use when the user wants to fit statistical models (MARS/earth, glm, lm, gam), run R packages (earth, e1071, ggplot2, caret), or produce publication-quality plots — all executed inside a disposable Docker container. Supports CSV input, automatic data conversion, custom train/test splits, evaluation requirements via markdown, and integration with agent-smith experiment loops for hyperparameter tuning.
+description: Run R models and visualizations via Docker (rocker/r-ver:latest) without requiring a local R installation. Use when the user wants to fit statistical models (MARS/earth, glm, lm, gam), run R packages (earth, e1071, ggplot2, caret), or produce publication-quality plots — all executed inside a disposable Docker container. Supports CSV input, automatic data conversion, custom train/test splits, evaluation requirements via markdown, and integration with agent-smith experiment loops for hyperparameter tuning. Make sure to use this skill whenever the user mentions R, CRAN packages, MARS, earth, glm, randomForest, ranger, glmnet, ggplot2, e1071, caret, or any R-specific model family — even if they don't explicitly mention Docker.
 ---
 
 # R-Docker
@@ -11,7 +11,7 @@ Run any R workflow inside a Docker container. No local R installation needed —
 
 - **Docker is the only way to run R.** Do not install R locally via Homebrew, apt, conda, or any other package manager. Do not use `rpy2`, `pyearth`, `sklearn-contrib-py-earth`, or any Python bridge/reimplementation of an R package.
 - If Docker is not installed or not running, **stop and ask the user to start or install Docker**. Do not fall back to local R or Python substitutes.
-- Every R execution goes through `scripts/r_worker.sh` (experiment loop) or `scripts/run_r.sh` (one-off). No exceptions.
+- Every R execution goes through `scripts/r_worker.sh` (experiment loop) or `scripts/run_r.sh` (one-off). These scripts handle Docker mounts, timeouts, and output capture correctly — running `docker run` or `docker exec` directly is fragile and error-prone.
 - **Never call `install.packages()` inside a train.R script.** Packages are installed once at worker startup or via `r_worker.sh install`. Scripts use `suppressPackageStartupMessages(library(...))` only.
 
 ## When to Use
@@ -35,9 +35,9 @@ The R script becomes the mutable experiment surface (like `train.py`), and the w
 
 ### Setup
 
-1. Start the worker with required packages:
+1. Start the worker with required packages (always include `pROC` — the primary template needs it):
    ```bash
-   bash scripts/r_worker.sh start data/prepared r_output -- earth e1071
+   bash scripts/r_worker.sh start data/prepared r_output -- pROC earth e1071
    ```
 2. Set `program.md` to use: `bash scripts/r_worker.sh run train.R 300`
 3. Copy `assets/r-template-tabular-classification.R` to `train.R` as starting point

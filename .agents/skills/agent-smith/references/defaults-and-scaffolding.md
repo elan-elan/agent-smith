@@ -117,52 +117,15 @@ Use these defaults unless the user wants a different cadence:
 - use a hard timeout of roughly 2x the baseline run time or the last comparable successful run
 - stop the batch when the chosen batch-level rule is reached
 
-### Incremental `results.tsv` recording
+### Recording, hygiene, and adaptive strategy
 
-**Hard rule.** Append one row to `results.tsv` immediately after reading each experiment's result — before committing, reverting, or planning the next experiment. Never defer recording to the end of a batch.
+The rules for incremental `results.tsv` recording, working tree hygiene, adaptive decision-making, and the `results.tsv` format are defined in the SKILL.md Hard Rules and Experiment Loop sections. They are the canonical source — do not duplicate them here.
 
-Use a single `printf` line to append:
+Key additional defaults for this reference:
 
-```bash
-printf '%s\t%s\t%s\t%s\n' "<N>" "<metric>" "<status>" "<description>" >> results.tsv
-```
-
-**Prohibited**: bulk-appending multiple rows at once, heredocs (`<< EOF`) with many lines, or reconstructing results from memory after the fact. Large heredocs can corrupt the terminal session. Reconstructing from memory risks data loss.
-
-After appending, sanity-check: `tail -1 results.tsv`
-
-If the file gets out of sync, fix it immediately with a single `printf` append before continuing.
-
-### Working tree hygiene
-
-- **No throwaway scripts**: do not create temporary utility scripts (e.g., `check_importances.py`) in the repo during the loop. Use inline terminal commands (`python -c '...'`) for one-off analysis.
-- **No large terminal operations**: avoid heredocs with dozens of lines or long `echo` chains. These corrupt the terminal session. Keep commands short and atomic.
-- **Clean tree between experiments**: before each experiment, the working tree should contain only committed files plus at most an uncommitted `results.tsv` update. Run `git status` periodically to verify.
-
-### Adaptive decision-making
-
-Do not plan all experiments in advance. After each run (or every few runs), reflect on the results so far:
-
-- which model families or architectures scored highest?
-- which hyperparameter directions are trending better?
-- which strategies (e.g., upsampling methods, regularization) helped vs. hurt?
-- are there diminishing returns — should the agent switch to a different approach?
-
-Use these patterns to choose the next experiment. Favor exploitation of promising directions while periodically exploring new ones. This informed iteration is the primary advantage of agent-driven experimentation over grid search.
-
-**Pruning heuristic**: when a new model family or major direction scores substantially worse than the current best (e.g., >1.5% absolute metric gap), do not invest additional experiments tuning it. One or two probes are enough to establish that a direction is unpromising. Move on.
-
-Prefer a simple tab-separated experiment log:
-
-```text
-experiment	<metric_column>	status	description
-```
-
-- **experiment**: sequential integer starting at 1
-- **metric column**: matches the metric name from the training output (e.g., `val_auc`, `val_loss`, `primary_metric`)
-- **status**: one of `keep`, `discard`, or `crash` (the bundled `summarize_results.py` depends on these exact values)
-
-Initialize `results.tsv` with just the header row before the first baseline run. Commit `results.tsv` as part of the post-batch wrap-up.
+- Initialize `results.tsv` with just the header row before the first baseline run
+- After appending a row, sanity-check with `tail -1 results.tsv`
+- If the file gets out of sync, fix it immediately with a single `printf` append before continuing
 
 ## Post-run summarization
 
