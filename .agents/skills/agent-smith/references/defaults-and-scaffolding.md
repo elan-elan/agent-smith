@@ -106,8 +106,8 @@ Use these defaults unless the user wants a different cadence:
 - the agent drives the loop directly — do not create batch runners, experiment scripts, or meta-harnesses that pre-generate and execute configurations; each iteration is an edit→run→evaluate→decide cycle performed by the agent
 - each experiment is a direct edit to the mutable file (typically `train.py`), not a config passed to a generic runner
 - after running, compare the result to the current best metric
-- if the metric improved, commit the mutable file immediately; the committed state should always reflect the current best
-- if the metric did not improve, revert the mutable file to the last committed state before starting the next experiment (`git checkout <file>`)
+- if the metric improved, commit the mutable file and `results.tsv` together immediately; the committed state should always reflect the current best
+- if the metric did not improve, revert the mutable file to the last committed state before starting the next experiment (`git checkout <file>`) and commit `results.tsv` separately so the discard row is preserved
 - infer per-run runtime expectations from the baseline or from recent comparable successful runs
 - redirect command output to `run.log`
 - read the final summary block from `run.log` rather than streaming full output
@@ -117,24 +117,15 @@ Use these defaults unless the user wants a different cadence:
 - use a hard timeout of roughly 2x the baseline run time or the last comparable successful run
 - stop the batch when the chosen batch-level rule is reached
 
-### Adaptive decision-making
+### Recording, hygiene, and adaptive strategy
 
-Do not plan all experiments in advance. After each run (or every few runs), reflect on the results so far:
+The rules for incremental `results.tsv` recording, working tree hygiene, adaptive decision-making, and the `results.tsv` format are defined in the SKILL.md Hard Rules and Experiment Loop sections. They are the canonical source — do not duplicate them here.
 
-- which model families or architectures scored highest?
-- which hyperparameter directions are trending better?
-- which strategies (e.g., upsampling methods, regularization) helped vs. hurt?
-- are there diminishing returns — should the agent switch to a different approach?
+Key additional defaults for this reference:
 
-Use these patterns to choose the next experiment. Favor exploitation of promising directions while periodically exploring new ones. This informed iteration is the primary advantage of agent-driven experimentation over grid search.
-
-Prefer a simple tab-separated experiment log:
-
-```text
-commit	primary_metric	status	description
-```
-
-Initialize `results.tsv` with just the header row before the first baseline run. Use `keep`, `discard`, or `crash` for status. Leave `results.tsv` untracked by git unless the user explicitly wants it committed.
+- Initialize `results.tsv` with just the header row before the first baseline run
+- After appending a row, sanity-check with `tail -1 results.tsv`
+- If the file gets out of sync, fix it immediately with a single `printf` append before continuing
 
 ## Post-run summarization
 
