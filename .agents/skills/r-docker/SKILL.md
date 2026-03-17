@@ -12,13 +12,19 @@ Run any R workflow inside a Docker container. No local R installation needed —
 - **Docker is the only way to run R.** Do not install R locally via Homebrew, apt, conda, or any other package manager. Do not use `rpy2`, `pyearth`, `sklearn-contrib-py-earth`, or any Python bridge/reimplementation of an R package.
 - If Docker is not installed or not running, **stop and ask the user to start or install Docker**. Do not fall back to local R or Python substitutes.
 - Every R execution goes through `scripts/r_worker.sh` (experiment loop) or `scripts/run_r.sh` (one-off). These scripts handle Docker mounts, timeouts, and output capture correctly — running `docker run` or `docker exec` directly is fragile and error-prone.
-- **Never call `install.packages()` inside a train.R script.** Packages are installed once at worker startup or via `r_worker.sh install`. Scripts use `suppressPackageStartupMessages(library(...))` only.
+- **In experiment-loop mode (`r_worker.sh`), never call `install.packages()` inside a train.R script.** Packages are installed once at worker startup or via `r_worker.sh install`. Scripts use `suppressPackageStartupMessages(library(...))` only.
+- **In one-off mode (`run_r.sh`), include idempotent `install.packages()` at the top of the script** so packages are installed automatically (the package-cache volume avoids recompilation on subsequent runs).
 
 ## When to Use
 
 Any request involving R, CRAN packages, or R-specific model families: MARS/earth, glm, lm, gam, ggplot2, e1071, randomForest, ranger, xgboost via R, glmnet, caret, etc.
 
-## Two Execution Modes
+## Choosing the Right Mode
+
+**Decision gate — check this FIRST before running anything:**
+
+- If the user asks for a **single model fit, one visualization, or a one-time script**, use **`scripts/run_r.sh`** (one-off mode).
+- Only use **`scripts/r_worker.sh`** (experiment-loop mode) when the user is doing **iterative experimentation** — agent-smith loops, hyperparameter tuning, or multi-run model comparison.
 
 | Mode | Script | Use for |
 |---|---|---|
@@ -28,6 +34,26 @@ Any request involving R, CRAN packages, or R-specific model families: MARS/earth
 One-off uses `docker run --rm` with a package cache volume. Experiment loop keeps a persistent container — near-zero overhead per run.
 
 See [references/docker-execution.md](./references/docker-execution.md) for full command reference, subcommands, data handling, and script generation rules.
+
+## One-off Workflow (`run_r.sh`)
+
+For a single model fit, visualization, or any non-iterative R task:
+
+1. Write the R script (or adapt a template from `assets/`)
+2. Include idempotent `install.packages()` at the top for any CRAN packages needed:
+   ```r
+   for (pkg in c("earth", "pROC")) {
+     if (!requireNamespace(pkg, quietly = TRUE))
+       install.packages(pkg, repos = "https://cloud.r-project.org", quiet = TRUE)
+   }
+   ```
+3. Run:
+   ```bash
+   bash scripts/run_r.sh my_script.R data/prepared r_output 300 2>&1 | tee run.log
+   ```
+4. Check output and extract metrics from `run.log`
+
+The package-cache volume (`r-pkg-cache`) persists across runs, so packages compile only once.
 
 ## Integration with Agent Smith
 

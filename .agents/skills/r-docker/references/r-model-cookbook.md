@@ -39,6 +39,10 @@ the dummy-variable trap (xgboost/glmnet handle this internally).
 - **Weights go on the `earth()` call, not inside `glm = list(...)`**.
   Wrong: `earth(x, y, glm = list(family = binomial, weights = w))` → crashes.
   Right: `earth(x, y, weights = w, glm = list(family = binomial))`.
+- **Leave `thresh` at the default (0.001).** Setting `thresh = 1e-4` forces the
+  forward pass to keep adding basis functions for negligible GCV R² gains, which
+  can multiply runtime by 5-10× on 50K+ rows. Only lower it if you have evidence
+  the model is stopping too early.
 - **`nfold > 0` multiplies runtime by ~nfold × 2.** On 40K+ rows with degree ≥ 3,
   this can take 10+ minutes. Avoid nfold for initial exploration; use it only for
   final model selection on the best config.
@@ -101,9 +105,10 @@ Approximate wall-clock time on ~50K rows, ~40 features (Docker on Apple Silicon)
 |---|---|---|
 | glm | default | 1-3s |
 | earth degree=1 | default thresh | 5-15s |
-| earth degree=2 | thresh=1e-4 | 15-60s |
-| earth degree=3 | thresh=1e-4 | 60-300s |
-| earth degree=2 + nfold=5 | | 120-600s |
+| earth degree=2 | default thresh | 15-45s |
+| earth degree=3 | default thresh | 45-180s |
+| earth degree=2 + nfold=5 | default thresh | 120-600s |
+| earth (any) + thresh=1e-4 | | 5-10× slower than default thresh |
 | randomForest | ntree=500 | 30-120s |
 | ranger | num.trees=500 | 10-30s |
 | xgboost | nrounds=200 | 5-15s |
