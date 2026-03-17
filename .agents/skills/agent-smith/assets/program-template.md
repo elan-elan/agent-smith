@@ -26,6 +26,20 @@ To set up a new run, work with the user to:
 
 Each experiment should optimize `{{metric_name}}`, where `{{metric_goal}}` is better.
 
+The agent should actively explore:
+
+- different model families
+- different feature-selection and preprocessing choices
+- different class-imbalance strategies such as upsampling, downsampling, and class weighting
+
+The key evaluation rule is strict:
+
+- keep the held-out test/validation split fixed across experiments
+- never upsample or downsample the held-out test/validation split
+- treat the held-out test/validation split as the natural class distribution
+- apply any upsampling or downsampling only to the training portion of the data
+- compare experiments only on the same fixed held-out split so metrics remain comparable
+
 The first run on a fresh experiment branch should always be the unmodified baseline.
 
 Stop condition for this batch:
@@ -106,6 +120,9 @@ Repeat:
 
 ## Guardrails
 
+- the agent itself drives each iteration — do not write batch runners or meta-scripts
+- the committed state of the mutable file(s) should always reflect the current best
+- never start a new experiment with a non-improving change still in the working tree
 - prefer small, reviewable diffs
 - keep the baseline runnable at all times
 - do not commit exploratory autotuning runs directly to `main` when a stable committed baseline already exists
@@ -113,6 +130,7 @@ Repeat:
 - use a hard timeout of roughly 2x that inferred runtime
 - avoid dependency churn unless the user approves it
 - when a dependency is required, prefer `uv add` over manual dependency edits
+- allow model-search and resampling experiments, but keep the held-out split fixed and untouched
 - prefer simpler changes when gains are similar
 
 If the user explicitly starts autonomous mode, continue running experiments until interrupted or until the batch-level stop rule is reached, unless you hit a hard blocker.
