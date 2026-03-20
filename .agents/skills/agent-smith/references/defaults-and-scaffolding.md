@@ -160,10 +160,10 @@ The script auto-detects common metric columns such as `primary_metric`, `metric`
 
 ## Package management
 
-Use `uv` for Python execution and dependency changes.
+**`uv` is the only permitted package manager.** Do not use `pip`, `pip install`, `conda`, `poetry`, or any other package manager — ever. All Python execution must use `uv run` and all dependency additions must use `uv add`.
 
 - check `which uv` first
-- if `uv` is missing, install it before any `uv run` or `uv add` step
+- if `uv` is missing, install it before any `uv run` or `uv add` step — never fall back to `pip` or `conda`
 - prefer a persistent base-shell install, e.g. `~/.local/bin`, instead of a conda-only install
 - make sure the shell startup file used by non-interactive shells exposes that path, then verify with `which uv` and `uv --version`
 - run scripts as `uv run prepare.py`, `uv run train.py`, or `uv run python path/to/script.py`
