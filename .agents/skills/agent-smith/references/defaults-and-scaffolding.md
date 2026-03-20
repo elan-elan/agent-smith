@@ -99,6 +99,20 @@ If the repo is not under git yet, initialize it first if the user wants commit-b
 
 ## Experiment loop defaults
 
+### Per-experiment time budget
+
+When scaffolding `program.md`, set `{{time_budget_minutes}}` based on problem complexity:
+
+| Problem type | Default budget |
+|---|---|
+| Small tabular (<10 k rows, <50 features) | 2 minutes |
+| Medium tabular (10 k–100 k rows) | 5 minutes |
+| Large tabular (100 k–1 M rows) or text/NLP | 10 minutes |
+| Image / deep learning / GPU workloads | 15–30 minutes |
+| Large-scale or distributed training | 30–60 minutes |
+
+These are starting defaults for scaffolded files. Once the baseline finishes, tighten the budget to **max(3× baseline wall-clock, 60 seconds)** for subsequent experiments. If the user supplies an explicit budget, always prefer that.
+
 Use these defaults unless the user wants a different cadence:
 
 - run the baseline first on a fresh branch before modifying code
@@ -114,7 +128,7 @@ Use these defaults unless the user wants a different cadence:
 - if the summary block is missing, inspect `tail -n 50 run.log`
 - if the error is trivial, fix and rerun
 - if the idea is broken or the run keeps crashing, log `crash` and move on
-- use a hard timeout of roughly 2x the baseline run time or the last comparable successful run
+- enforce the per-experiment time budget from `program.md`; use `timeout` or kill the process if it exceeds the limit; after the baseline, tighten the budget to max(3× baseline wall-clock, 60 seconds)
 - stop the batch when the chosen batch-level rule is reached
 
 ### Recording, hygiene, and adaptive strategy
@@ -146,10 +160,10 @@ The script auto-detects common metric columns such as `primary_metric`, `metric`
 
 ## Package management
 
-Use `uv` for Python execution and dependency changes.
+**`uv` is the only permitted package manager.** Do not use `pip`, `pip install`, `conda`, `poetry`, or any other package manager — ever. All Python execution must use `uv run` and all dependency additions must use `uv add`.
 
 - check `which uv` first
-- if `uv` is missing, install it before any `uv run` or `uv add` step
+- if `uv` is missing, install it before any `uv run` or `uv add` step — never fall back to `pip` or `conda`
 - prefer a persistent base-shell install, e.g. `~/.local/bin`, instead of a conda-only install
 - make sure the shell startup file used by non-interactive shells exposes that path, then verify with `which uv` and `uv --version`
 - run scripts as `uv run prepare.py`, `uv run train.py`, or `uv run python path/to/script.py`

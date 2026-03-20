@@ -44,10 +44,11 @@ Each experiment follows this exact sequence:
 
 1. **Edit** the mutable file — the code change IS the experiment
 2. **Run** the training command: `uv run train.py 2>&1 | tee run.log`
-3. **Read** the final metric block from `run.log`
-4. **Record** the result in `results.tsv` — **immediately** (see Hard Rules §1 below)
-5. **If improved**: commit the mutable file(s) and `results.tsv` together
-6. **If not improved**: revert the mutable file(s) (`git checkout <file>`) and commit `results.tsv` separately so the discard row is preserved
+3. **Enforce the time budget** — if the run exceeds the per-experiment limit from `program.md`, kill it, record `crash` (with a timeout note), revert, and move on
+4. **Read** the final metric block from `run.log`
+5. **Record** the result in `results.tsv` — **immediately**, before ANY other action (see Hard Rules §1). Never skip this step, even for crashes or nonsensical outputs.
+6. **If improved**: commit the mutable file(s) and `results.tsv` together
+7. **If not improved**: revert the mutable file(s) (`git checkout <file>`) and commit `results.tsv` separately so the discard row is preserved
 
 The committed mutable file should always reflect the current best.
 
@@ -77,12 +78,38 @@ These rules exist because violating them caused real data-loss and workflow fail
 
 Append one row via `printf` right after reading the result — before committing, reverting, or planning the next experiment.
 
+The column order is strictly: `experiment  metric  status  description`. Always use positional `printf` — never interpolate variables out of order.
+
 ```bash
 printf '%s\t%s\t%s\t%s\n' "<N>" "<metric>" "<status>" "<description>" >> results.tsv
-tail -1 results.tsv   # sanity check
 ```
 
+**Validate every append.** After writing, run this check:
+
+```bash
+tail -1 results.tsv | awk -F'\t' '{
+  ok=1;
+  if ($1 !~ /^[0-9]+$/) ok=0;
+  if ($2 !~ /^[0-9.eE+-]*$/) ok=0;
+  if ($3 !~ /^(keep|discard|crash)$/) ok=0;
+  if (!ok) print "ERROR: malformed row: "$0
+  else print "OK: "$0
+}'
+```
+
+If the check prints `ERROR`, delete the bad row and re-append with the correct column order before continuing. A common mistake is swapping the description and metric columns — always put the numeric metric in column 2 and the free-text description in column 4.
+
 Bulk-appending multiple rows, heredocs with many lines, and reconstructing results from memory have all caused real data loss — avoid them.
+
+**Never skip logging.** Every experiment — whether it succeeds, fails, crashes, times out, or produces a nonsensical result — gets exactly one row. There are zero exceptions. If the run crashed, log it as `crash`. If the metric looks wrong, log it as `discard` with a note. A missing row is always worse than a `crash` row.
+
+**Periodic integrity audit.** Every 5 experiments, verify that `results.tsv` has no gaps:
+
+```bash
+awk -F'\t' 'NR>1 { if ($1 != NR-1) print "GAP: expected "NR-1" got "$1 }' results.tsv
+```
+
+If gaps are found, reconstruct the missing rows from `git log --oneline` and commit messages before continuing. Do not proceed with the next experiment until the file is complete.
 
 ### 2. Keep the working tree clean
 
@@ -90,7 +117,15 @@ Bulk-appending multiple rows, heredocs with many lines, and reconstructing resul
 - **No large terminal operations** (multi-line heredocs, long echo chains). Keep commands short and atomic.
 - **Verify periodically**: `git status` should show only committed files + at most an uncommitted `results.tsv` update.
 
-### 3. Never start an experiment with stale state
+### 3. All files stay inside the repository
+
+Never write files to `/tmp`, `/var`, the home directory, or any path outside the current repository. Log files (`run.log`), results (`results.tsv`), intermediate outputs, and any other artifacts must live in the repo working tree. Writing outside the repo can fail due to permissions and makes experiments unreproducible.
+
+### 4. `uv` is the only package manager
+
+Do not use `pip`, `pip install`, `conda`, `poetry`, or any other package manager. All Python execution must go through `uv run` and all dependency additions through `uv add`. If `uv` is not installed, install it first — never fall back to another tool.
+
+### 5. Never start an experiment with stale state
 
 A non-improving change must be reverted before the next experiment begins.
 
