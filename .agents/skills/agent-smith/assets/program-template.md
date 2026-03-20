@@ -26,6 +26,17 @@ To set up a new run, work with the user to:
 
 Each experiment should optimize `{{metric_name}}`, where `{{metric_goal}}` is better.
 
+### Per-Experiment Time Budget
+
+Each experiment has a hard wall-clock limit of **{{time_budget_minutes}} minutes**. If a single run exceeds this limit:
+
+1. Kill the process (`kill %1` or equivalent)
+2. Log it as `crash` in `results.tsv` with a description noting the timeout
+3. Revert any mutable file changes
+4. Move on to the next experiment
+
+This prevents the loop from stalling on models or configurations that are too expensive to evaluate within the experiment cadence. If multiple experiments approach the time limit, simplify the model, reduce data size, or lower iteration counts before retrying the same idea.
+
 The agent should actively explore:
 
 - different model families

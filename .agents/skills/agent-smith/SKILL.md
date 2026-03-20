@@ -44,10 +44,11 @@ Each experiment follows this exact sequence:
 
 1. **Edit** the mutable file — the code change IS the experiment
 2. **Run** the training command: `uv run train.py 2>&1 | tee run.log`
-3. **Read** the final metric block from `run.log`
-4. **Record** the result in `results.tsv` — **immediately** (see Hard Rules §1 below)
-5. **If improved**: commit the mutable file(s) and `results.tsv` together
-6. **If not improved**: revert the mutable file(s) (`git checkout <file>`) and commit `results.tsv` separately so the discard row is preserved
+3. **Enforce the time budget** — if the run exceeds the per-experiment limit from `program.md`, kill it, record `crash` (with a timeout note), revert, and move on
+4. **Read** the final metric block from `run.log`
+5. **Record** the result in `results.tsv` — **immediately** (see Hard Rules §1 below)
+6. **If improved**: commit the mutable file(s) and `results.tsv` together
+7. **If not improved**: revert the mutable file(s) (`git checkout <file>`) and commit `results.tsv` separately so the discard row is preserved
 
 The committed mutable file should always reflect the current best.
 

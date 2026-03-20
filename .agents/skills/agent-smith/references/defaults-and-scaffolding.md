@@ -99,6 +99,20 @@ If the repo is not under git yet, initialize it first if the user wants commit-b
 
 ## Experiment loop defaults
 
+### Per-experiment time budget
+
+When scaffolding `program.md`, set `{{time_budget_minutes}}` based on problem complexity:
+
+| Problem type | Default budget |
+|---|---|
+| Small tabular (<10 k rows, <50 features) | 2 minutes |
+| Medium tabular (10 k–100 k rows) | 5 minutes |
+| Large tabular (100 k–1 M rows) or text/NLP | 10 minutes |
+| Image / deep learning / GPU workloads | 15–30 minutes |
+| Large-scale or distributed training | 30–60 minutes |
+
+These are starting defaults for scaffolded files. Once the baseline finishes, tighten the budget to **max(3× baseline wall-clock, 60 seconds)** for subsequent experiments. If the user supplies an explicit budget, always prefer that.
+
 Use these defaults unless the user wants a different cadence:
 
 - run the baseline first on a fresh branch before modifying code
@@ -114,7 +128,7 @@ Use these defaults unless the user wants a different cadence:
 - if the summary block is missing, inspect `tail -n 50 run.log`
 - if the error is trivial, fix and rerun
 - if the idea is broken or the run keeps crashing, log `crash` and move on
-- use a hard timeout of roughly 2x the baseline run time or the last comparable successful run
+- enforce the per-experiment time budget from `program.md`; use `timeout` or kill the process if it exceeds the limit; after the baseline, tighten the budget to max(3× baseline wall-clock, 60 seconds)
 - stop the batch when the chosen batch-level rule is reached
 
 ### Recording, hygiene, and adaptive strategy
