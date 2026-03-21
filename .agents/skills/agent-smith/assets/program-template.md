@@ -79,6 +79,15 @@ unless the user explicitly broadens the search space.
 
 All else equal, prefer simpler changes. A tiny gain that adds a lot of complexity is usually not worth keeping. An equally good or better result with less complexity is a strong outcome.
 
+### Complexity-performance trade-off
+
+As experiments progress, watch for diminishing returns. If the last several experiments each yield smaller improvements than the early ones, the metric is plateauing. At that point:
+
+- Do not keep stacking complexity (larger ensembles, deeper pipelines, exotic feature engineering) for marginal gains
+- If a candidate scores within ~0.1–0.3% of the current best but is meaningfully simpler, prefer the simpler one and mark the complex variant as `discard`
+- Consider stopping the batch early and recommending the current best when further gains appear to require disproportionate complexity
+- Note this reasoning in the `description` column of `results.tsv` so the trade-off is preserved for later review
+
 ## Output Format
 
 Make the training script print a final summary block. Prefer a machine-readable block like:
