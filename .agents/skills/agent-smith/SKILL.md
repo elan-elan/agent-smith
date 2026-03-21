@@ -71,49 +71,37 @@ Do not pre-plan all experiments. After every few runs, review emerging patterns 
 
 **Pruning heuristic**: when a new direction scores >1.5% absolute worse than current best, one or two probes is enough — move on.
 
+### Complexity-aware stopping
+
+As the batch progresses, track the complexity of each experiment alongside its metric. When the last 3–5 experiments each yield smaller gains than the early ones, the curve is plateauing. At that point, stop chasing marginal improvements through added complexity (stacking, heavy feature engineering, large grids). A solution within ~0.1–0.3% of the best that is dramatically simpler is often the better outcome. Note trade-off reasoning in `results.tsv` descriptions so it's preserved.
+
 See [references/defaults-and-scaffolding.md](./references/defaults-and-scaffolding.md) for full adaptive decision-making guidance.
 
 ## Hard Rules
 
-These rules exist because violating them caused real data-loss and workflow failures:
+Violating these has caused real data-loss and workflow failures:
 
 ### 1. Record `results.tsv` immediately after each experiment
 
-Append one row via `printf` right after reading the result — before committing, reverting, or planning the next experiment.
+Every experiment gets exactly one row — successes, failures, crashes, timeouts, nonsensical results. A missing row is always worse than a `crash` row, because it silently breaks the sequential numbering and makes the history unrecoverable.
 
-The column order is strictly: `experiment  metric  status  commit  description`. Always use positional `printf` — never interpolate variables out of order.
+Column order: `experiment  metric  status  commit  description`. Always use positional `printf`:
 
 ```bash
 printf '%s\t%s\t%s\t%s\t%s\n' "<N>" "<metric>" "<status>" "$COMMIT" "<description>" >> results.tsv
 ```
 
-**Validate every append.** After writing, run this check:
+After every append, validate the row:
 
 ```bash
-tail -1 results.tsv | awk -F'\t' '{
-  ok=1;
-  if ($1 !~ /^[0-9]+$/) ok=0;
-  if ($2 !~ /^[0-9.eE+-]*$/) ok=0;
-  if ($3 !~ /^(keep|discard|crash)$/) ok=0;
-  if ($4 !~ /^[0-9a-f]*$/) ok=0;
-  if (!ok) print "ERROR: malformed row: "$0
-  else print "OK: "$0
-}'
+tail -1 results.tsv | awk -F'\t' '{ if ($1!~/^[0-9]+$/ || $2!~/^[0-9.eE+-]*$/ || $3!~/^(keep|discard|crash)$/ || $4!~/^[0-9a-f]*$/) print "ERROR: "$0; else print "OK: "$0 }'
 ```
 
-If the check prints `ERROR`, delete the bad row and re-append with the correct column order before continuing. A common mistake is swapping columns — the numeric metric is always column 2, status column 3, commit hash column 4, and free-text description column 5.
+If `ERROR`, delete the bad row and re-append correctly. Common mistake: swapping the metric (col 2) and description (col 5).
 
-Bulk-appending multiple rows, heredocs with many lines, and reconstructing results from memory have all caused real data loss — avoid them.
+Every 5 experiments, check for gaps: `awk -F'\t' 'NR>1 && $1!=NR-1 { print "GAP: expected "NR-1" got "$1 }' results.tsv`. Fix gaps before continuing.
 
-**Never skip logging.** Every experiment — whether it succeeds, fails, crashes, times out, or produces a nonsensical result — gets exactly one row. There are zero exceptions. If the run crashed, log it as `crash`. If the metric looks wrong, log it as `discard` with a note. A missing row is always worse than a `crash` row.
-
-**Periodic integrity audit.** Every 5 experiments, verify that `results.tsv` has no gaps:
-
-```bash
-awk -F'\t' 'NR>1 { if ($1 != NR-1) print "GAP: expected "NR-1" got "$1 }' results.tsv
-```
-
-If gaps are found, reconstruct the missing rows from `git log --oneline` and commit messages before continuing. Do not proceed with the next experiment until the file is complete.
+Never bulk-append multiple rows or reconstruct from memory — both have caused real data loss.
 
 ### 2. Keep the working tree clean
 
