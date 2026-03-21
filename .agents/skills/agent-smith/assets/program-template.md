@@ -106,13 +106,14 @@ grep "^primary_metric:\|^status:" run.log
 Record experiments in `results.tsv` using tab-separated fields:
 
 ```text
-experiment	{{metric_name}}	status	description
+experiment	{{metric_name}}	status	commit	description
 ```
 
 - **experiment**: sequential integer starting at 1
 - **status**: one of `keep`, `discard`, or `crash`
+- **commit**: short git hash from `git rev-parse --short HEAD` after committing kept code; empty for `discard` and `crash`
 
-Append one row immediately after each experiment — never batch or defer. Commit `results.tsv` as part of the post-batch wrap-up.
+Append one row immediately after each experiment — never batch or defer. The commit hash lets the agent (or the user) checkout any kept experiment’s exact code state later via `git checkout <hash>`.
 
 ## Loop
 
@@ -124,10 +125,11 @@ Repeat:
 4. run the training command as `{{train_command}} 2>&1 | tee run.log`
 5. read the final metric block from `run.log`
 6. if the final metric block is missing, inspect `tail -n 50 run.log`, attempt an easy fix, and otherwise record a crash
-7. **immediately** record the result in `results.tsv` via a single `printf` line — before committing, reverting, or planning the next experiment
-8. **if improved**: commit the mutable file(s) and `results.tsv` together
-9. **if not improved**: revert the mutable file(s) (`git checkout <file>`) and commit `results.tsv` separately
-10. stop when the batch-level stop rule above has been reached
+7. **if improved**: commit the mutable file(s) first (`git add <files> && git commit`), then capture `COMMIT=$(git rev-parse --short HEAD)`
+8. **if not improved or crash**: revert the mutable file(s) (`git checkout -- <file>`), set `COMMIT=""`
+9. **immediately** record the result in `results.tsv` via a single `printf` line — including `$COMMIT`
+10. commit `results.tsv` separately: `git add results.tsv && git commit -m "results: exp N"`
+11. stop when the batch-level stop rule above has been reached
 
 ## Guardrails
 

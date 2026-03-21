@@ -44,22 +44,25 @@ Each experiment follows this exact sequence:
 
 1. **Edit** the mutable file — the code change IS the experiment
 2. **Run** the training command: `uv run train.py 2>&1 | tee run.log`
-3. **Enforce the time budget** — if the run exceeds the per-experiment limit from `program.md`, kill it, record `crash` (with a timeout note), revert, and move on
+3. **Enforce the time budget** — if the run exceeds the per-experiment limit from `program.md`, kill it, treat it as a `crash` (with a timeout note), revert, and move on
 4. **Read** the final metric block from `run.log`
-5. **Record** the result in `results.tsv` — **immediately**, before ANY other action (see Hard Rules §1). Never skip this step, even for crashes or nonsensical outputs.
-6. **If improved**: commit the mutable file(s) and `results.tsv` together
-7. **If not improved**: revert the mutable file(s) (`git checkout <file>`) and commit `results.tsv` separately so the discard row is preserved
+5. **Commit or revert first** to capture the commit hash:
+   - **If improved**: `git add <mutable> && git commit -m "exp N: <description>"`, then capture `COMMIT=$(git rev-parse --short HEAD)`
+   - **If not improved (or crash)**: `git checkout -- <mutable>`, set `COMMIT=""`
+6. **Record** the result in `results.tsv` — **immediately** after the commit/revert, using `$COMMIT` (see Hard Rules §1). Never skip this step, even for crashes or nonsensical outputs.
+7. **Commit `results.tsv`**: `git add results.tsv && git commit -m "results: exp N (keep|discard|crash)"`
 
 The committed mutable file should always reflect the current best.
 
 ### `results.tsv` format
 
 ```text
-experiment	<metric_column>	status	description
+experiment	<metric_column>	status	commit	description
 ```
 
 - **experiment**: sequential integer starting at 1
 - **status**: one of `keep`, `discard`, or `crash` (the bundled `summarize_results.py` depends on these exact values)
+- **commit**: short git hash from the code commit (`git rev-parse --short HEAD`); empty for `discard` and `crash` since their code is never committed
 - Leave the metric cell empty for crash/invalid runs
 
 ### Adaptive experimentation
@@ -78,10 +81,10 @@ These rules exist because violating them caused real data-loss and workflow fail
 
 Append one row via `printf` right after reading the result — before committing, reverting, or planning the next experiment.
 
-The column order is strictly: `experiment  metric  status  description`. Always use positional `printf` — never interpolate variables out of order.
+The column order is strictly: `experiment  metric  status  commit  description`. Always use positional `printf` — never interpolate variables out of order.
 
 ```bash
-printf '%s\t%s\t%s\t%s\n' "<N>" "<metric>" "<status>" "<description>" >> results.tsv
+printf '%s\t%s\t%s\t%s\t%s\n' "<N>" "<metric>" "<status>" "$COMMIT" "<description>" >> results.tsv
 ```
 
 **Validate every append.** After writing, run this check:
@@ -92,12 +95,13 @@ tail -1 results.tsv | awk -F'\t' '{
   if ($1 !~ /^[0-9]+$/) ok=0;
   if ($2 !~ /^[0-9.eE+-]*$/) ok=0;
   if ($3 !~ /^(keep|discard|crash)$/) ok=0;
+  if ($4 !~ /^[0-9a-f]*$/) ok=0;
   if (!ok) print "ERROR: malformed row: "$0
   else print "OK: "$0
 }'
 ```
 
-If the check prints `ERROR`, delete the bad row and re-append with the correct column order before continuing. A common mistake is swapping the description and metric columns — always put the numeric metric in column 2 and the free-text description in column 4.
+If the check prints `ERROR`, delete the bad row and re-append with the correct column order before continuing. A common mistake is swapping columns — the numeric metric is always column 2, status column 3, commit hash column 4, and free-text description column 5.
 
 Bulk-appending multiple rows, heredocs with many lines, and reconstructing results from memory have all caused real data loss — avoid them.
 
