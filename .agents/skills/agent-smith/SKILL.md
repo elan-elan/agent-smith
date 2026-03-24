@@ -28,23 +28,39 @@ Read [references/defaults-and-scaffolding.md](./references/defaults-and-scaffold
 
 **Intake**: Inspect the repo, infer defaults, then confirm in one short message: prep entrypoint, training entrypoint, instructions file, metric contract, batch-level stop rule, and git tracking preference. See the reference for exact prompts and follow-up questions.
 
-**Setup checklist**: resolve paths → for each of the three core files (`prepare.py`, `train.py`, `program.md` or their resolved equivalents): if it exists, **read it**; if it does not exist, **scaffold it** from `assets/` templates adapted to the user's prompt, then read it → ensure `uv` → inspect/create `pyproject.toml` → **create experiment branch** (if on `main`/`master`, branch to `experiments/<tag>` before any commits) → initialize `results.tsv` → summarize the experiment contract.
+**Setup checklist**: resolve paths → for each of the three core files (`prepare.py`, `train.py`, `program.md` or their resolved equivalents): if it exists, **read it**; if it does not exist, **scaffold it** from `assets/` templates adapted to the user's prompt, then read it → ensure `uv` → inspect/create `pyproject.toml` → **create experiment branch** (if on `main`/`master`, branch to `experiments/<tag>` before any commits) → initialize `results.tsv` → **present program.md for review** (see below) → summarize the experiment contract.
 
 **Scaffolding**: use the bundled `assets/` templates. Keep files small, prefer existing libraries, make output end with a machine-readable summary block.
+
+### Pre-loop `program.md` review
+
+Before starting any experiments, present a concise summary of `program.md` to the user — highlight the metric contract, mutable surface, stop rules, and any domain-specific guardrails. Then ask:
+
+> Here is a quick summary of the current experiment program. Is there anything you would like to change about the default behavior before we start?
+
+Wait for the user's response. If they provide changes or additional context, update `program.md` immediately before entering the experiment loop.
+
+## `program.md` as a Living Document
+
+`program.md` is the single source of truth for experiment behavior. Treat it as a living document throughout the run:
+
+- **Add user feedback**: Whenever the user provides additional information, preferences, constraints, or clarifications during the run, append or update the relevant section of `program.md` so the guidance is preserved for future iterations.
+- **Consult when unsure**: When the agent is uncertain about strategy, scope, metric interpretation, or any experiment decision, re-read `program.md` before proceeding. The answer may already be there.
+- **Respect mid-run edits**: The user may manually edit `program.md` at any time during the run. Before each experiment, if significant iterations have passed or the agent is making a strategic decision, re-read `program.md` to pick up any changes the user may have made.
 
 ## Experiment Loop
 
 ### The agent IS the loop
 
-Do not write batch automation scripts, meta-runners, or experiment harnesses. The agent itself drives each iteration: edit, run, read, decide. Each experiment is informed by every previous result.
+The agent itself drives each iteration: edit, run, read, decide. Each experiment is informed by every previous result — the agent can change direction based on what worked and what didn't, which is impossible with pre-planned batch scripts. For this reason, do not write batch automation scripts, meta-runners, or experiment harnesses; they lock in decisions before results are known and defeat the adaptive advantage.
 
 ### Edit → Run → Record → Commit/Revert
 
 Each experiment follows this exact sequence:
 
 1. **Edit** the mutable file — the code change IS the experiment
-2. **Run** the training command: `uv run train.py 2>&1 | tee run.log`
-3. **Enforce the time budget** — if the run exceeds the per-experiment limit from `program.md`, kill it, treat it as a `crash` (with a timeout note), revert, and move on
+2. **Run** the training command in a **foreground (blocking) terminal** (see Terminal Execution below): `uv run train.py 2>&1 | tee run.log`
+3. **Enforce the time budget** — set the terminal timeout to the per-experiment time budget from `program.md` (in milliseconds). If the run exceeds it, the terminal returns automatically; treat the run as a `crash` (with a timeout note), revert, and move on
 4. **Read** the final metric block from `run.log`
 5. **Commit or revert first** to capture the commit hash:
    - **If improved**: `git add <mutable> && git commit -m "exp N: <description>"`, then capture `COMMIT=$(git rev-parse --short HEAD)`
@@ -77,6 +93,15 @@ As the batch progresses, track the complexity of each experiment alongside its m
 
 See [references/defaults-and-scaffolding.md](./references/defaults-and-scaffolding.md) for full adaptive decision-making guidance.
 
+### Terminal execution
+
+Always run experiment commands in a **foreground (blocking) terminal** — never as a background process with periodic polling. This is critical for token efficiency:
+
+- **Foreground terminal**: the tool call blocks until the command finishes. The agent automatically receives the output and knows the run is complete. No polling needed.
+- **Timeout**: set the terminal timeout to the per-experiment time budget from `program.md`, converted to milliseconds (e.g., 300 s → `300000` ms). If the command exceeds this, the terminal returns with whatever output was collected — treat it as a `crash`.
+- **Never use background terminals** for experiment runs. Background execution requires the agent to repeatedly call `get_terminal_output` to check if the run finished, wasting tokens on every poll.
+- **`| tee run.log`** still applies — the output goes to both the terminal (which the agent reads on completion) and `run.log` (which is useful for post-hoc inspection and `grep`).
+
 ## Hard Rules
 
 Violating these has caused real data-loss and workflow failures:
@@ -101,7 +126,7 @@ If `ERROR`, delete the bad row and re-append correctly. Common mistake: swapping
 
 Every 5 experiments, check for gaps: `awk -F'\t' 'NR>1 && $1!=NR-1 { print "GAP: expected "NR-1" got "$1 }' results.tsv`. Fix gaps before continuing.
 
-Never bulk-append multiple rows or reconstruct from memory — both have caused real data loss.
+Bulk-appending multiple rows or reconstructing from memory has caused real data loss in past runs — always append one row at a time, immediately after the experiment finishes.
 
 ### 2. Keep the working tree clean
 
@@ -111,15 +136,15 @@ Never bulk-append multiple rows or reconstruct from memory — both have caused 
 
 ### 3. All files stay inside the repository
 
-Never write files to `/tmp`, `/var`, the home directory, or any path outside the current repository. Log files (`run.log`), results (`results.tsv`), intermediate outputs, and any other artifacts must live in the repo working tree. Writing outside the repo can fail due to permissions and makes experiments unreproducible.
+All files — log files (`run.log`), results (`results.tsv`), intermediate outputs, and any other artifacts — must live in the repo working tree. Writing to `/tmp`, `/var`, or the home directory can silently fail due to permissions and makes experiments unreproducible, since those paths aren't tracked by git and won't survive across machines or sessions.
 
 ### 4. `uv` is the only package manager
 
-Do not use `pip`, `pip install`, `conda`, `poetry`, or any other package manager. All Python execution must go through `uv run` and all dependency additions through `uv add`. If `uv` is not installed, install it first — never fall back to another tool.
+Mixing package managers causes lock file conflicts, phantom dependency mismatches, and breaks reproducibility — an experiment that works under `pip` but not `uv` (or vice versa) is undebuggable. All Python execution must go through `uv run` and all dependency additions through `uv add`. If `uv` is not installed, install it first rather than falling back to another tool.
 
-### 5. Never start an experiment with stale state
+### 5. Revert before starting the next experiment
 
-A non-improving change must be reverted before the next experiment begins.
+A non-improving change must be reverted before the next experiment begins. If stale code remains in the working tree, the next experiment builds on the wrong baseline, making its metric incomparable to previous results and corrupting the entire experiment history.
 
 ## Post-Batch Wrap-Up
 
