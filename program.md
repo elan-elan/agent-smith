@@ -71,8 +71,8 @@ Modify `train.py`. Avoid modifying `prepare.py` unless the user explicitly broad
 1. review what has worked so far
 2. choose the next experiment idea
 3. edit `train.py` directly — the code change IS the experiment
-4. run: `uv run train.py 2>&1 | tee run.log`
-5. read the final metric block from `run.log`
+4. run: `uv run train.py 2>&1 | tee run.log` in a **foreground (blocking) terminal** with timeout set to the time budget (in ms)
+5. read the final metric block from the terminal output or `run.log`
 6. record in `results.tsv`
 7. **if improved**: `git add train.py && git commit -m "description val_auc=X.XXXXXX"`
 8. **if not improved**: `git checkout train.py`

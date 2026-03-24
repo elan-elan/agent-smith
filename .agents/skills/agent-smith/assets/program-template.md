@@ -131,8 +131,8 @@ Repeat:
 1. inspect the current repo state
 2. if this branch has no baseline result yet, run the baseline as-is and record it
 3. otherwise make one experiment-sized change
-4. run the training command as `{{train_command}} 2>&1 | tee run.log`
-5. read the final metric block from `run.log`
+4. run the training command in a **foreground (blocking) terminal** with a timeout set to the time budget: `{{train_command}} 2>&1 | tee run.log`
+5. read the final metric block from the terminal output or `run.log`
 6. if the final metric block is missing, inspect `tail -n 50 run.log`, attempt an easy fix, and otherwise record a crash
 7. **if improved**: commit the mutable file(s) first (`git add <files> && git commit`), then capture `COMMIT=$(git rev-parse --short HEAD)`
 8. **if not improved or crash**: revert the mutable file(s) (`git checkout -- <file>`), set `COMMIT=""`

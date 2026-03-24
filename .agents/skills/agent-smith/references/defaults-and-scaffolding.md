@@ -123,12 +123,13 @@ Use these defaults unless the user wants a different cadence:
 - if the metric improved, commit the mutable file and `results.tsv` together immediately; the committed state should always reflect the current best
 - if the metric did not improve, revert the mutable file to the last committed state before starting the next experiment (`git checkout <file>`) and commit `results.tsv` separately so the discard row is preserved
 - infer per-run runtime expectations from the baseline or from recent comparable successful runs
-- redirect command output to `run.log`
+- **always run experiment commands in a foreground (blocking) terminal** — never as a background process with periodic polling. Set the terminal timeout to the per-experiment time budget (in milliseconds). The agent blocks until the command finishes and automatically receives the output. This avoids wasting tokens on repeated `get_terminal_output` polling calls.
+- redirect command output to `run.log` via `| tee run.log` so the agent gets live output from the blocking terminal AND a persistent log file for post-hoc inspection
 - read the final summary block from `run.log` rather than streaming full output
 - if the summary block is missing, inspect `tail -n 50 run.log`
 - if the error is trivial, fix and rerun
 - if the idea is broken or the run keeps crashing, log `crash` and move on
-- enforce the per-experiment time budget from `program.md`; use `timeout` or kill the process if it exceeds the limit; after the baseline, tighten the budget to max(3× baseline wall-clock, 60 seconds)
+- enforce the per-experiment time budget from `program.md`; set the terminal timeout to the budget in milliseconds; after the baseline, tighten the budget to max(3× baseline wall-clock, 60 seconds)
 - stop the batch when the chosen batch-level rule is reached
 
 ### Recording, hygiene, and adaptive strategy
@@ -160,10 +161,10 @@ The script auto-detects common metric columns such as `primary_metric`, `metric`
 
 ## Package management
 
-**`uv` is the only permitted package manager.** Do not use `pip`, `pip install`, `conda`, `poetry`, or any other package manager — ever. All Python execution must use `uv run` and all dependency additions must use `uv add`.
+**`uv` is the only permitted package manager.** Mixing package managers causes lock file conflicts and phantom dependency mismatches that break reproducibility. All Python execution must use `uv run` and all dependency additions must use `uv add`.
 
 - check `which uv` first
-- if `uv` is missing, install it before any `uv run` or `uv add` step — never fall back to `pip` or `conda`
+- if `uv` is missing, install it before any `uv run` or `uv add` step rather than falling back to `pip` or `conda`
 - prefer a persistent base-shell install, e.g. `~/.local/bin`, instead of a conda-only install
 - make sure the shell startup file used by non-interactive shells exposes that path, then verify with `which uv` and `uv --version`
 - run scripts as `uv run prepare.py`, `uv run train.py`, or `uv run python path/to/script.py`
