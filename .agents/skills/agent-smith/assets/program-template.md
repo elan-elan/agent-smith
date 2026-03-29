@@ -55,7 +55,7 @@ The first run on a fresh experiment branch should always be the unmodified basel
 
 Stop condition for this batch:
 
-`{{stop_rule}}`
+Keep running experiments until the user says stop. If a hard limit is needed, the user can add one here (e.g., max experiments, wall-clock time, or early stop after N non-improving runs).
 
 Default run command:
 
@@ -85,8 +85,9 @@ As experiments progress, watch for diminishing returns. If the last several expe
 
 - Do not keep stacking complexity (larger ensembles, deeper pipelines, exotic feature engineering) for marginal gains
 - If a candidate scores within ~0.1–0.3% of the current best but is meaningfully simpler, prefer the simpler one and mark the complex variant as `discard`
-- Consider stopping the batch early and recommending the current best when further gains appear to require disproportionate complexity
 - Note this reasoning in the `description` column of `results.tsv` so the trade-off is preserved for later review
+
+However, do **not** stop the batch on your own due to plateaus. The user decides when to stop — just keep exploring alternative directions.
 
 ## Output Format
 
@@ -138,7 +139,7 @@ Repeat:
 8. **if not improved or crash**: revert the mutable file(s) (`git checkout -- <file>`), set `COMMIT=""`
 9. **immediately** record the result in `results.tsv` via a single `printf` line — including `$COMMIT`
 10. commit `results.tsv` separately: `git add results.tsv && git commit -m "results: exp N"`
-11. stop when the batch-level stop rule above has been reached
+11. stop when the user says stop, or when an explicit stop rule in this file has been reached
 
 ## Guardrails
 
@@ -155,7 +156,7 @@ Repeat:
 - allow model-search and resampling experiments, but keep the held-out split fixed and untouched
 - prefer simpler changes when gains are similar
 
-If the user explicitly starts autonomous mode, continue running experiments until interrupted or until the batch-level stop rule is reached, unless you hit a hard blocker.
+If the user explicitly starts autonomous mode, continue running experiments until the user interrupts or until an explicit stop rule from this file is reached, unless you hit a hard blocker.
 
 ## Wrap-up
 
