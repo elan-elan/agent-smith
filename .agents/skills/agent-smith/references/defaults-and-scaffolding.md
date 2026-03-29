@@ -55,7 +55,7 @@ Ask these first:
 1. Which path should count as the prep script?
 2. Which path should count as the training script?
 3. Which path should count as the instructions file?
-4. What metric should be optimized, is higher or lower better, and, if you have not already specified one, what single batch-level stop rule should I use: maximum experiments, maximum total wall-clock time, or early stop after N non-improving runs?
+4. What metric should be optimized, and is higher or lower better?
 5. Should experiment tracking use local git only, or should commits also be pushed to a remote repository?
 
 If any of the three core files are missing, also ask whether to create that file now.
@@ -67,7 +67,7 @@ Use prompts like:
 - `I did not find a program file. Would you like me to create a baseline program.md for you? If yes, tell me which files should be mutable, the run command, and the metric contract.`
 - `If you want me to track or push experiment commits, give me the git remote or GitHub repository URL now. If not, I will assume local git tracking only.`
 - `I see this repo is already committed to git. I recommend creating a separate experiment branch instead of committing autotuning runs to main. Should I create one now?`
-- `I do not need a fixed per-run budget up front. If you have not already set one batch-level limit, give me one of these: maximum experiments, maximum total wall-clock time, or early stop after N non-improving runs.`
+- `I do not need a fixed per-run budget up front. By default, I will keep running experiments until you tell me to stop. If you prefer a hard limit (maximum experiments, wall-clock time, or early stop after N non-improving runs), let me know and I will add it to program.md.`
 
 Ask follow-ups only when required:
 
@@ -83,7 +83,7 @@ Also confirm:
 - if a dependency is missing, should the skill add it with `uv add` immediately? default: yes
 - should git tracking remain local, or should the agent also push to a remote? default: local only unless the user gives a remote URL
 - if the repo already has a committed baseline, should autotuning happen on a dedicated experiment branch? default: yes
-- if the user has not already set one, which single batch-level stop rule should govern the run? default: ask for one; if the user does not care, prefer `max_experiments`
+- if the user has not already set one, which single batch-level stop rule should govern the run? default: keep running until the user says stop; if the user provides an explicit rule, record it in `program.md`
 
 ## Git workflow
 
@@ -130,7 +130,7 @@ Use these defaults unless the user wants a different cadence:
 - if the error is trivial, fix and rerun
 - if the idea is broken or the run keeps crashing, log `crash` and move on
 - enforce the per-experiment time budget from `program.md`; set the terminal timeout to the budget in milliseconds; after the baseline, tighten the budget to max(3× baseline wall-clock, 60 seconds)
-- stop the batch when the chosen batch-level rule is reached
+- stop the batch when the user says stop, or when an explicit stop rule from `program.md` is reached
 
 ### Recording, hygiene, and adaptive strategy
 

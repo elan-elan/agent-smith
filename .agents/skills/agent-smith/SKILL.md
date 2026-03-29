@@ -26,7 +26,7 @@ The experiment loop is not limited to Python. The same edit → run → commit/r
 
 Read [references/defaults-and-scaffolding.md](./references/defaults-and-scaffolding.md) before proposing defaults. It contains candidate path order, intake prompts, scaffold heuristics, git workflow, and `program.md` adaptation rules.
 
-**Intake**: Inspect the repo, infer defaults, then confirm in one short message: prep entrypoint, training entrypoint, instructions file, metric contract, batch-level stop rule, and git tracking preference. See the reference for exact prompts and follow-up questions.
+**Intake**: Inspect the repo, infer defaults, then confirm in one short message: prep entrypoint, training entrypoint, instructions file, metric contract, and git tracking preference. See the reference for exact prompts and follow-up questions.
 
 **Setup checklist**: resolve paths → for each of the three core files (`prepare.py`, `train.py`, `program.md` or their resolved equivalents): if it exists, **read it**; if it does not exist, **scaffold it** from `assets/` templates adapted to the user's prompt, then read it → ensure `uv` → inspect/create `pyproject.toml` → **create experiment branch** (if on `main`/`master`, branch to `experiments/<tag>` before any commits) → initialize `results.tsv` → **present program.md for review** (see below) → summarize the experiment contract.
 
@@ -34,7 +34,7 @@ Read [references/defaults-and-scaffolding.md](./references/defaults-and-scaffold
 
 ### Pre-loop `program.md` review
 
-Before starting any experiments, present a concise summary of `program.md` to the user — highlight the metric contract, mutable surface, stop rules, and any domain-specific guardrails. Then ask:
+Before starting any experiments, present a concise summary of `program.md` to the user — highlight the metric contract, mutable surface, and any domain-specific guardrails. Then ask:
 
 > Here is a quick summary of the current experiment program. Is there anything you would like to change about the default behavior before we start?
 
@@ -87,9 +87,11 @@ Do not pre-plan all experiments. After every few runs, review emerging patterns 
 
 **Pruning heuristic**: when a new direction scores >1.5% absolute worse than current best, one or two probes is enough — move on.
 
-### Complexity-aware stopping
+### When to stop
 
-As the batch progresses, track the complexity of each experiment alongside its metric. When the last 3–5 experiments each yield smaller gains than the early ones, the curve is plateauing. At that point, stop chasing marginal improvements through added complexity (stacking, heavy feature engineering, large grids). A solution within ~0.1–0.3% of the best that is dramatically simpler is often the better outcome. Note trade-off reasoning in `results.tsv` descriptions so it's preserved.
+The default stopping rule is simple: **keep running until the user says stop.** The user is watching the results and will intervene when they're satisfied or want to change direction. The agent should not unilaterally decide the batch is "done" based on plateaus, diminishing returns, or complexity judgments — these are the user's call.
+
+If `program.md` specifies an explicit stop rule (e.g., max experiments, wall-clock limit), honor it. Otherwise, keep experimenting.
 
 See [references/defaults-and-scaffolding.md](./references/defaults-and-scaffolding.md) for full adaptive decision-making guidance.
 
