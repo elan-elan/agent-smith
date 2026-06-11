@@ -31,7 +31,7 @@ const markLocation = !optionFlag('no-marker');
 const markerRadius = Number(optionValue('marker-radius') ?? DEFAULT_MARKER_RADIUS);
 const viewport = DEFAULT_VIEWPORT;
 const clip = parseClip(optionValue('clip'));
-const locations = [
+const benchmarkLocations = [
   { index: 1, label: 'vancouver-wa', query: '45.6273,-122.6716' },
   { index: 2, label: 'little-rock-ar', query: '34.7465,-92.2896' },
   { index: 3, label: 'tallahassee-fl', query: '30.4515,-84.2727' },
@@ -43,6 +43,8 @@ const locations = [
   { index: 9, label: 'fargo-nd', query: '46.8772,-96.7898' },
   { index: 10, label: 'atlanta-ga', query: '33.7490,-84.3880' }
 ];
+const limit = Number(optionValue('limit') ?? benchmarkLocations.length);
+const locations = benchmarkLocations.slice(0, Number.isFinite(limit) && limit > 0 ? Math.min(limit, benchmarkLocations.length) : benchmarkLocations.length);
 
 await fs.mkdir(imageDir, { recursive: true });
 
@@ -75,7 +77,7 @@ try {
 
     perLocation.push(result);
     if (result.status === 'ok') lastConfirmedCamera = result.camera;
-    console.log(`${result.status.toUpperCase()} ${location.index}/10 ${location.label} ${result.totalMs}ms`);
+    console.log(`${result.status.toUpperCase()} ${perLocation.length}/${locations.length} ${location.label} ${result.totalMs}ms`);
   }
 } finally {
   await browser.close();
@@ -94,6 +96,7 @@ const report = {
   viewport,
   clip,
   locations: locations.map((location) => location.query),
+  totalBenchmarkLocations: benchmarkLocations.length,
   results: summary,
   perLocation
 };
