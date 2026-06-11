@@ -1,0 +1,31 @@
+{
+  "skill_name": "google-earth-crop",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Use the google-earth-crop skill to run the 10-location US coordinate benchmark defined in benchmarks/us-10-coordinate-benchmark.md. From the skill directory, run node scripts/benchmark_google_earth_crop.mjs --output benchmark-runs/us-10-coordinate. The skill/script should install Playwright or Chromium automatically if unavailable. Save screenshots and benchmark-summary.json, then report the success count, failures, mean/median/min/max runtime, detail-quality results, and any observed errors.",
+      "expected_output": "A benchmark run with 10 red-dot-marked Google Earth images and a benchmark-summary.json showing selectedDate 2019-12-31 for every successful location, target camera proximity checks, marker metadata, splash/blank/low-detail rejection, per-location timing, aggregate timing, and any errors encountered.",
+      "files": [
+        "benchmarks/us-10-coordinate-benchmark.md",
+        "benchmarks/baseline-2026-06-10.json",
+        "scripts/google_earth_crop_core.mjs",
+        "scripts/crop_google_earth.mjs",
+        "scripts/benchmark_google_earth_crop.mjs"
+      ],
+      "expectations": [
+        "The run uses exactly the 10 benchmark coordinates from benchmarks/us-10-coordinate-benchmark.md.",
+        "The skill points normal crop requests to scripts/crop_google_earth.mjs and keeps shared crop logic in scripts/google_earth_crop_core.mjs.",
+        "The agent attempts npm install from the skill directory and npx playwright install chromium before running the benchmark if Playwright/Chromium are not already available.",
+        "benchmark-summary.json reports total=10, ok=10, and failed=0.",
+        "Each successful crop verifies selectedDate equals 2019-12-31 before saving the final screenshot.",
+        "Each coordinate search requires URL camera proximity within 0.02 degrees of the requested lat/lon rather than relying only on movement from the previous camera.",
+        "Each output PNG is a centered square crop by default and includes a red dot at the query/camera center; benchmark-summary.json records marker visibility, centered/drawn metadata, and a marker pixel check.",
+        "Each crop prefers a close neighborhood-scale camera altitude and records adaptive zoom attempts when it must fall back wider to avoid blank or low-detail imagery.",
+        "The final crop is taken only after a 3500ms render settle following date validation.",
+        "The benchmark detects and reports Google Earth splash/blank crops instead of treating screenshot byte size as sufficient validation.",
+        "The benchmark detects and reports blurry low-resolution tiles using the final image detail score.",
+        "The output includes per-location status, output path, selected date, search/history/screenshot timing, total runtime, and aggregate mean/median/min/max runtime."
+      ]
+    }
+  ]
+}
