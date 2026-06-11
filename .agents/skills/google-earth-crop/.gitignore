@@ -1,0 +1,5 @@
+node_modules/
+benchmark-runs/
+crops/
+*.log
+.DS_Store

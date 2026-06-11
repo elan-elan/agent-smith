@@ -1,0 +1,51 @@
+{
+  "date": "2026-06-10",
+  "benchmark": "us-10-coordinate-benchmark",
+  "cutoffDate": "2020-01-01",
+  "targetDate": "2019-12-31",
+  "viewport": { "width": 1400, "height": 1000 },
+  "clip": { "x": 0, "y": 320, "width": 780, "height": 400 },
+  "renderSettleMs": 3500,
+  "locations": [
+    "45.6273,-122.6716",
+    "34.7465,-92.2896",
+    "30.4515,-84.2727",
+    "43.6150,-116.2023",
+    "36.1539,-115.1522",
+    "41.1400,-104.8202",
+    "32.7767,-96.7970",
+    "39.1031,-84.5120",
+    "46.8772,-96.7898",
+    "33.7490,-84.3880"
+  ],
+  "method": "wait for target camera, inject /data= historical date, wait 500ms and verify selected date, wait 3500ms more for render settle, crop once",
+  "results": {
+    "ok": 10,
+    "failed": 0,
+    "meanMs": 9851,
+    "medianMs": 9498,
+    "minMs": 9049,
+    "maxMs": 13406,
+    "splashDetected": 0,
+    "blankDetected": 0,
+    "legacyPassCriteria": true
+  },
+  "qualityReview": {
+    "reviewedDate": "2026-06-10",
+    "minDetailScoreThreshold": 50,
+    "strictPassCriteria": false,
+    "lowDetailDetected": 2,
+    "lowDetailFiles": [
+      { "file": "01-vancouver-wa.png", "detailScore": 2.72 },
+      { "file": "10-atlanta-ga.png", "detailScore": 2.36 }
+    ]
+  },
+  "observedErrors": [
+    "A 500ms post-injection crop can capture the Google Earth splash screen even when URL/date are correct.",
+    "Using screenshot byte size as a blank/splash detector misses high-byte splash images.",
+    "When reusing a page, camera movement alone can accept stale coordinates; coordinate searches should require proximity to the requested lat/lon.",
+    "Treating the current camera as stale rejects a valid same-location target; use target proximity first, stale-movement only for non-coordinate searches.",
+    "Date/place-correct crops can still save blurry low-resolution tiles; require a minimum detail score before accepting the crop.",
+    "Decoding URL date immediately after commit can hit an execution-context-destroyed race; wait about 500ms or retry briefly."
+  ]
+}
