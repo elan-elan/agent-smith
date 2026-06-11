@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
 
 export const skillDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DEFAULT_VIEWPORT = { width: 1600, height: 1200 };
@@ -11,6 +12,7 @@ export const DEFAULT_RENDER_SETTLE_MS = 3500;
 export const DEFAULT_MIN_DETAIL_SCORE = 50;
 export const DEFAULT_PREFERRED_CAMERA_ALTITUDE = 500;
 export const DEFAULT_MARKER_RADIUS = 7;
+const ULTRA_CLOSE_CAMERA_ALTITUDE = 100;
 
 export function optionValue(name, args = process.argv) {
   const index = args.indexOf(`--${name}`);
@@ -126,16 +128,18 @@ export async function cropGoogleEarth(page, options) {
         let screenshot = await page.screenshot({ fullPage: false, scale: 'css', clip });
         attempt.screenshotMs = Date.now() - screenshotStart;
         attempt.screenshotBytes = screenshot.length;
-        attempt.analysis = await analyzeShot(page, screenshot, minDetailScore);
+        attempt.analysis = analyzeShot(screenshot, minDetailScore);
         attempt.retried = false;
 
         if (attempt.analysis.splash || attempt.analysis.blank || attempt.analysis.lowDetail) {
+          attempt.preRetryAnalysis = attempt.analysis;
+          attempt.preRetryScreenshotBytes = screenshot.length;
           const retryStart = Date.now();
           await page.waitForTimeout(3000);
           screenshot = await page.screenshot({ fullPage: false, scale: 'css', clip });
           attempt.retryMs = Date.now() - retryStart;
           attempt.screenshotBytes = screenshot.length;
-          attempt.analysis = await analyzeShot(page, screenshot, minDetailScore);
+          attempt.analysis = analyzeShot(screenshot, minDetailScore);
           attempt.retried = true;
         }
 
@@ -148,9 +152,11 @@ export async function cropGoogleEarth(page, options) {
         let output = screenshot;
         if (marker.enabled && marker.visible) {
           const overlayStart = Date.now();
-          output = await overlayLocationMarker(page, screenshot, marker);
+          const marked = await screenshotWithLocationMarker(page, marker, clip, viewport);
+          output = marked.screenshot;
           marker.overlayMs = Date.now() - overlayStart;
-          marker.pixelCheck = await analyzeMarkerPixels(page, output, marker);
+          marker.sampleClip = marked.sampleClip;
+          marker.pixelCheck = marked.pixelCheck;
           marker.drawn = marker.pixelCheck.redPixels >= marker.pixelCheck.minRedPixels;
           if (!marker.drawn) throw new Error(`location marker overlay not detected: ${marker.pixelCheck.redPixels} red pixels`);
         }
@@ -268,12 +274,18 @@ function cameraFromUrl(url) {
 function cameraAltitudeCandidates(currentAltitude, preferredAltitude) {
   if (!Number.isFinite(currentAltitude) || currentAltitude <= 0) return [];
   const preferred = Number.isFinite(preferredAltitude) && preferredAltitude > 0 ? preferredAltitude : DEFAULT_PREFERRED_CAMERA_ALTITUDE;
-  const fallbackAltitudes = [preferred, 500, 700, 1000, 1500, 2000, 2500, currentAltitude]
-    .filter((altitude) => altitude >= preferred || Math.abs(altitude - currentAltitude) < 1e-6);
+  const ultraCloseInitialCamera = currentAltitude < Math.min(preferred, ULTRA_CLOSE_CAMERA_ALTITUDE);
+  const closeInitialCamera = currentAltitude < preferred;
+  const fallbackAltitudes = ultraCloseInitialCamera
+    ? [preferred, 500, 700, 1000, 1500, 2000, 2500, currentAltitude]
+    : closeInitialCamera
+      ? [currentAltitude, preferred, 500, 700, 1000, 1500, 2000, 2500]
+      : [preferred, 500, 700, 1000, 1500, 2000, 2500, currentAltitude]
+        .filter((altitude) => altitude >= preferred || Math.abs(altitude - currentAltitude) < 1e-6);
   const candidates = [];
   for (const altitude of fallbackAltitudes) {
     if (!Number.isFinite(altitude) || altitude <= 0) continue;
-    if (altitude > currentAltitude) continue;
+    if (!closeInitialCamera && altitude > currentAltitude) continue;
     if (!candidates.some((candidate) => Math.abs(candidate - altitude) < 1e-6)) candidates.push(altitude);
   }
   if (!candidates.length) candidates.push(currentAltitude);
@@ -308,67 +320,86 @@ function locationMarkerForClip(clip, viewport, { enabled, radius }) {
   };
 }
 
-async function overlayLocationMarker(page, screenshot, marker) {
-  const bytes = await page.evaluate(async ({ bytes, marker }) => {
-    const blob = new Blob([new Uint8Array(bytes)], { type: 'image/png' });
-    const bitmap = await createImageBitmap(blob);
-    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-    const context = canvas.getContext('2d');
-    context.drawImage(bitmap, 0, 0);
-    context.save();
-    context.shadowColor = 'rgba(0, 0, 0, 0.65)';
-    context.shadowBlur = 3;
-    context.lineWidth = marker.strokeWidth;
-    context.strokeStyle = marker.stroke;
-    context.fillStyle = marker.fill;
-    context.beginPath();
-    context.arc(marker.x, marker.y, marker.radius, 0, Math.PI * 2);
-    context.fill();
-    context.stroke();
-    context.restore();
-    const output = await canvas.convertToBlob({ type: 'image/png' });
-    return Array.from(new Uint8Array(await output.arrayBuffer()));
-  }, { bytes: Array.from(screenshot), marker });
-  return Buffer.from(bytes);
+async function screenshotWithLocationMarker(page, marker, clip, viewport) {
+  const markerId = '__google_earth_crop_marker__';
+  const absoluteX = clip.x + marker.x;
+  const absoluteY = clip.y + marker.y;
+  const samplePadding = Math.ceil(marker.radius + marker.strokeWidth + 4);
+  const sampleX = Math.max(0, Math.floor(absoluteX - samplePadding));
+  const sampleY = Math.max(0, Math.floor(absoluteY - samplePadding));
+  const sampleRight = Math.min(viewport.width, Math.ceil(absoluteX + samplePadding));
+  const sampleBottom = Math.min(viewport.height, Math.ceil(absoluteY + samplePadding));
+  const sampleClip = {
+    x: sampleX,
+    y: sampleY,
+    width: Math.max(1, sampleRight - sampleX),
+    height: Math.max(1, sampleBottom - sampleY)
+  };
+
+  await page.evaluate(async ({ marker, markerId, absoluteX, absoluteY }) => {
+    document.getElementById(markerId)?.remove();
+    const element = document.createElement('div');
+    element.id = markerId;
+    Object.assign(element.style, {
+      position: 'fixed',
+      left: `${absoluteX}px`,
+      top: `${absoluteY}px`,
+      width: `${(marker.radius + marker.strokeWidth) * 2}px`,
+      height: `${(marker.radius + marker.strokeWidth) * 2}px`,
+      transform: 'translate(-50%, -50%)',
+      borderRadius: '9999px',
+      border: `${marker.strokeWidth}px solid ${marker.stroke}`,
+      background: marker.fill,
+      boxSizing: 'border-box',
+      boxShadow: '0 0 3px rgba(0, 0, 0, 0.65)',
+      pointerEvents: 'none',
+      zIndex: '2147483647'
+    });
+    document.documentElement.appendChild(element);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }, { marker, markerId, absoluteX, absoluteY });
+
+  try {
+    const screenshot = await page.screenshot({ fullPage: false, scale: 'css', clip });
+    const sample = await page.screenshot({ fullPage: false, scale: 'css', clip: sampleClip });
+    const sampleMarker = { ...marker, x: absoluteX - sampleClip.x, y: absoluteY - sampleClip.y };
+    const pixelCheck = analyzeMarkerPixels(sample, sampleMarker);
+    return { screenshot, sampleClip, pixelCheck };
+  } finally {
+    await page.evaluate((markerId) => document.getElementById(markerId)?.remove(), markerId).catch(() => {});
+  }
 }
 
-async function analyzeMarkerPixels(page, screenshot, marker) {
-  return page.evaluate(async ({ bytes, marker }) => {
-    const blob = new Blob([new Uint8Array(bytes)], { type: 'image/png' });
-    const bitmap = await createImageBitmap(blob);
-    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    context.drawImage(bitmap, 0, 0);
-    const data = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
-    const radius = Math.ceil(marker.radius + marker.strokeWidth + 2);
-    const xStart = Math.max(0, Math.floor(marker.x - radius));
-    const xEnd = Math.min(bitmap.width - 1, Math.ceil(marker.x + radius));
-    const yStart = Math.max(0, Math.floor(marker.y - radius));
-    const yEnd = Math.min(bitmap.height - 1, Math.ceil(marker.y + radius));
-    let sampledPixels = 0;
-    let redPixels = 0;
+function analyzeMarkerPixels(screenshot, marker) {
+  const { width, height, data } = decodePngRgba(screenshot);
+  const radius = Math.ceil(marker.radius + marker.strokeWidth + 2);
+  const xStart = Math.max(0, Math.floor(marker.x - radius));
+  const xEnd = Math.min(width - 1, Math.ceil(marker.x + radius));
+  const yStart = Math.max(0, Math.floor(marker.y - radius));
+  const yEnd = Math.min(height - 1, Math.ceil(marker.y + radius));
+  let sampledPixels = 0;
+  let redPixels = 0;
 
-    for (let yPosition = yStart; yPosition <= yEnd; yPosition += 1) {
-      for (let xPosition = xStart; xPosition <= xEnd; xPosition += 1) {
-        const distance = Math.hypot(xPosition - marker.x, yPosition - marker.y);
-        if (distance > marker.radius + 1) continue;
-        const offset = (yPosition * bitmap.width + xPosition) * 4;
-        const red = data[offset];
-        const green = data[offset + 1];
-        const blue = data[offset + 2];
-        sampledPixels += 1;
-        if (red > 180 && green < 100 && blue < 100 && red - green > 80 && red - blue > 80) redPixels += 1;
-      }
+  for (let yPosition = yStart; yPosition <= yEnd; yPosition += 1) {
+    for (let xPosition = xStart; xPosition <= xEnd; xPosition += 1) {
+      const distance = Math.hypot(xPosition - marker.x, yPosition - marker.y);
+      if (distance > marker.radius + 1) continue;
+      const offset = (yPosition * width + xPosition) * 4;
+      const red = data[offset];
+      const green = data[offset + 1];
+      const blue = data[offset + 2];
+      sampledPixels += 1;
+      if (red > 180 && green < 100 && blue < 100 && red - green > 80 && red - blue > 80) redPixels += 1;
     }
+  }
 
-    const minRedPixels = Math.max(1, Math.floor(marker.radius * marker.radius * 0.4));
-    return {
-      sampledPixels,
-      redPixels,
-      minRedPixels,
-      redRatio: redPixels / Math.max(sampledPixels, 1)
-    };
-  }, { bytes: Array.from(screenshot), marker });
+  const minRedPixels = Math.max(1, Math.floor(marker.radius * marker.radius * 0.4));
+  return {
+    sampledPixels,
+    redPixels,
+    minRedPixels,
+    redRatio: redPixels / Math.max(sampledPixels, 1)
+  };
 }
 
 function formatAltitude(value) {
@@ -458,102 +489,180 @@ function writeVarint(value) {
   return Buffer.from(bytes);
 }
 
-async function analyzeShot(page, screenshot, minDetailScore) {
-  return page.evaluate(async ({ bytes, minDetailScore }) => {
-    const blob = new Blob([new Uint8Array(bytes)], { type: 'image/png' });
-    const bitmap = await createImageBitmap(blob);
-    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    context.drawImage(bitmap, 0, 0);
-    const data = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+function analyzeShot(screenshot, minDetailScore) {
+  const { width, height, data } = decodePngRgba(screenshot);
 
-    const countRegion = (xStartRatio, xEndRatio, yStartRatio, yEndRatio, predicate) => {
-      let count = 0;
-      let hits = 0;
-      const xStart = Math.floor(bitmap.width * xStartRatio);
-      const xEnd = Math.floor(bitmap.width * xEndRatio);
-      const yStart = Math.floor(bitmap.height * yStartRatio);
-      const yEnd = Math.floor(bitmap.height * yEndRatio);
-      for (let yPosition = yStart; yPosition < yEnd; yPosition += 4) {
-        for (let xPosition = xStart; xPosition < xEnd; xPosition += 4) {
-          const offset = (yPosition * bitmap.width + xPosition) * 4;
-          const red = data[offset];
-          const green = data[offset + 1];
-          const blue = data[offset + 2];
-          count += 1;
-          if (predicate(red, green, blue)) hits += 1;
-        }
-      }
-      return hits / Math.max(count, 1);
-    };
-
-    let sampleCount = 0;
-    let brightnessSum = 0;
-    let brightnessSquareSum = 0;
-    for (let yPosition = 0; yPosition < bitmap.height; yPosition += 8) {
-      for (let xPosition = 0; xPosition < bitmap.width; xPosition += 8) {
-        const offset = (yPosition * bitmap.width + xPosition) * 4;
-        const brightness = (data[offset] + data[offset + 1] + data[offset + 2]) / 3;
-        sampleCount += 1;
-        brightnessSum += brightness;
-        brightnessSquareSum += brightness * brightness;
+  const countRegion = (xStartRatio, xEndRatio, yStartRatio, yEndRatio, predicate) => {
+    let count = 0;
+    let hits = 0;
+    const xStart = Math.floor(width * xStartRatio);
+    const xEnd = Math.floor(width * xEndRatio);
+    const yStart = Math.floor(height * yStartRatio);
+    const yEnd = Math.floor(height * yEndRatio);
+    for (let yPosition = yStart; yPosition < yEnd; yPosition += 4) {
+      for (let xPosition = xStart; xPosition < xEnd; xPosition += 4) {
+        const offset = (yPosition * width + xPosition) * 4;
+        const red = data[offset];
+        const green = data[offset + 1];
+        const blue = data[offset + 2];
+        count += 1;
+        if (predicate(red, green, blue)) hits += 1;
       }
     }
+    return hits / Math.max(count, 1);
+  };
 
-    const brightnessMean = brightnessSum / Math.max(sampleCount, 1);
-    const brightnessVariance = brightnessSquareSum / Math.max(sampleCount, 1) - brightnessMean * brightnessMean;
-    const brightnessStd = Math.sqrt(Math.max(brightnessVariance, 0));
-    const logoWhite = countRegion(0.52, 0.95, 0.08, 0.28, (red, green, blue) => red > 215 && green > 215 && blue > 215 && Math.max(red, green, blue) - Math.min(red, green, blue) < 25);
-    const spinnerBlue = countRegion(0.65, 0.82, 0.28, 0.48, (red, green, blue) => blue > 145 && green > 85 && green < 180 && red < 90 && blue - red > 90);
-    const darkLeft = countRegion(0.00, 0.50, 0.00, 0.58, (red, green, blue) => (red + green + blue) / 3 < 55);
-    const flatGreen = countRegion(0.00, 1.00, 0.00, 1.00, (red, green, blue) => green > 80 && green > red * 1.25 && green > blue * 1.25);
-
-    let detailCount = 0;
-    let gradientSum = 0;
-    let gradientSquareSum = 0;
-    let strongEdges = 0;
-    let veryStrongEdges = 0;
-    for (let yPosition = 2; yPosition < bitmap.height - 2; yPosition += 2) {
-      for (let xPosition = 2; xPosition < bitmap.width - 2; xPosition += 2) {
-        const offset = (yPosition * bitmap.width + xPosition) * 4;
-        const right = (yPosition * bitmap.width + xPosition + 2) * 4;
-        const down = ((yPosition + 2) * bitmap.width + xPosition) * 4;
-        const brightness = (data[offset] + data[offset + 1] + data[offset + 2]) / 3;
-        const rightBrightness = (data[right] + data[right + 1] + data[right + 2]) / 3;
-        const downBrightness = (data[down] + data[down + 1] + data[down + 2]) / 3;
-        const gradient = Math.abs(brightness - rightBrightness) + Math.abs(brightness - downBrightness);
-        detailCount += 1;
-        gradientSum += gradient;
-        gradientSquareSum += gradient * gradient;
-        if (gradient > 18) strongEdges += 1;
-        if (gradient > 35) veryStrongEdges += 1;
-      }
+  let sampleCount = 0;
+  let brightnessSum = 0;
+  let brightnessSquareSum = 0;
+  for (let yPosition = 0; yPosition < height; yPosition += 8) {
+    for (let xPosition = 0; xPosition < width; xPosition += 8) {
+      const offset = (yPosition * width + xPosition) * 4;
+      const brightness = (data[offset] + data[offset + 1] + data[offset + 2]) / 3;
+      sampleCount += 1;
+      brightnessSum += brightness;
+      brightnessSquareSum += brightness * brightness;
     }
+  }
 
-    const gradientMean = gradientSum / Math.max(detailCount, 1);
-    const gradientVariance = gradientSquareSum / Math.max(detailCount, 1) - gradientMean * gradientMean;
-    const strongEdgeRatio = strongEdges / Math.max(detailCount, 1);
-    const veryStrongEdgeRatio = veryStrongEdges / Math.max(detailCount, 1);
-    const detailScore = gradientMean * (1 + strongEdgeRatio * 10);
+  const brightnessMean = brightnessSum / Math.max(sampleCount, 1);
+  const brightnessVariance = brightnessSquareSum / Math.max(sampleCount, 1) - brightnessMean * brightnessMean;
+  const brightnessStd = Math.sqrt(Math.max(brightnessVariance, 0));
+  const logoWhite = countRegion(0.52, 0.95, 0.08, 0.28, (red, green, blue) => red > 215 && green > 215 && blue > 215 && Math.max(red, green, blue) - Math.min(red, green, blue) < 25);
+  const spinnerBlue = countRegion(0.65, 0.82, 0.28, 0.48, (red, green, blue) => blue > 145 && green > 85 && green < 180 && red < 90 && blue - red > 90);
+  const darkLeft = countRegion(0.00, 0.50, 0.00, 0.58, (red, green, blue) => (red + green + blue) / 3 < 55);
+  const flatGreen = countRegion(0.00, 1.00, 0.00, 1.00, (red, green, blue) => green > 80 && green > red * 1.25 && green > blue * 1.25);
 
-    return {
-      width: bitmap.width,
-      height: bitmap.height,
-      logoWhite,
-      spinnerBlue,
-      darkLeft,
-      flatGreen,
-      brightnessStd,
-      gradientMean,
-      gradientStd: Math.sqrt(Math.max(gradientVariance, 0)),
-      strongEdgeRatio,
-      veryStrongEdgeRatio,
-      detailScore,
-      splash: logoWhite > 0.03 && (spinnerBlue > 0.001 || darkLeft > 0.70),
-      blank: flatGreen > 0.85 || brightnessStd < 5,
-      lowDetail: detailScore < minDetailScore
-    };
-  }, { bytes: Array.from(screenshot), minDetailScore });
+  let detailCount = 0;
+  let gradientSum = 0;
+  let gradientSquareSum = 0;
+  let strongEdges = 0;
+  let veryStrongEdges = 0;
+  for (let yPosition = 2; yPosition < height - 2; yPosition += 2) {
+    for (let xPosition = 2; xPosition < width - 2; xPosition += 2) {
+      const offset = (yPosition * width + xPosition) * 4;
+      const right = (yPosition * width + xPosition + 2) * 4;
+      const down = ((yPosition + 2) * width + xPosition) * 4;
+      const brightness = (data[offset] + data[offset + 1] + data[offset + 2]) / 3;
+      const rightBrightness = (data[right] + data[right + 1] + data[right + 2]) / 3;
+      const downBrightness = (data[down] + data[down + 1] + data[down + 2]) / 3;
+      const gradient = Math.abs(brightness - rightBrightness) + Math.abs(brightness - downBrightness);
+      detailCount += 1;
+      gradientSum += gradient;
+      gradientSquareSum += gradient * gradient;
+      if (gradient > 18) strongEdges += 1;
+      if (gradient > 35) veryStrongEdges += 1;
+    }
+  }
+
+  const gradientMean = gradientSum / Math.max(detailCount, 1);
+  const gradientVariance = gradientSquareSum / Math.max(detailCount, 1) - gradientMean * gradientMean;
+  const strongEdgeRatio = strongEdges / Math.max(detailCount, 1);
+  const veryStrongEdgeRatio = veryStrongEdges / Math.max(detailCount, 1);
+  const detailScore = gradientMean * (1 + strongEdgeRatio * 10);
+
+  return {
+    width,
+    height,
+    logoWhite,
+    spinnerBlue,
+    darkLeft,
+    flatGreen,
+    brightnessStd,
+    gradientMean,
+    gradientStd: Math.sqrt(Math.max(gradientVariance, 0)),
+    strongEdgeRatio,
+    veryStrongEdgeRatio,
+    detailScore,
+    splash: logoWhite > 0.03 && (spinnerBlue > 0.001 || darkLeft > 0.70),
+    blank: flatGreen > 0.85 || brightnessStd < 5,
+    lowDetail: detailScore < minDetailScore
+  };
+}
+
+function decodePngRgba(png) {
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (!png.subarray(0, signature.length).equals(signature)) throw new Error('Invalid PNG signature');
+
+  let width = null;
+  let height = null;
+  let bitDepth = null;
+  let colorType = null;
+  let interlace = null;
+  const idatChunks = [];
+
+  for (let offset = signature.length; offset < png.length;) {
+    const length = png.readUInt32BE(offset);
+    const type = png.toString('ascii', offset + 4, offset + 8);
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + length;
+    const chunk = png.subarray(dataStart, dataEnd);
+    offset = dataEnd + 4;
+
+    if (type === 'IHDR') {
+      width = chunk.readUInt32BE(0);
+      height = chunk.readUInt32BE(4);
+      bitDepth = chunk[8];
+      colorType = chunk[9];
+      interlace = chunk[12];
+    } else if (type === 'IDAT') {
+      idatChunks.push(chunk);
+    } else if (type === 'IEND') {
+      break;
+    }
+  }
+
+  if (!width || !height) throw new Error('PNG missing IHDR');
+  if (bitDepth !== 8) throw new Error(`Unsupported PNG bit depth ${bitDepth}`);
+  if (interlace !== 0) throw new Error('Unsupported interlaced PNG');
+
+  const sourceChannels = colorType === 6 ? 4 : colorType === 2 ? 3 : null;
+  if (!sourceChannels) throw new Error(`Unsupported PNG color type ${colorType}`);
+
+  const stride = width * sourceChannels;
+  const inflated = zlib.inflateSync(Buffer.concat(idatChunks));
+  const source = Buffer.alloc(width * height * sourceChannels);
+  let inputOffset = 0;
+
+  for (let yPosition = 0; yPosition < height; yPosition += 1) {
+    const filter = inflated[inputOffset++];
+    const rowOffset = yPosition * stride;
+    for (let xByte = 0; xByte < stride; xByte += 1) {
+      const value = inflated[inputOffset++];
+      const left = xByte >= sourceChannels ? source[rowOffset + xByte - sourceChannels] : 0;
+      const up = yPosition > 0 ? source[rowOffset - stride + xByte] : 0;
+      const upLeft = yPosition > 0 && xByte >= sourceChannels ? source[rowOffset - stride + xByte - sourceChannels] : 0;
+      let reconstructed;
+      if (filter === 0) reconstructed = value;
+      else if (filter === 1) reconstructed = value + left;
+      else if (filter === 2) reconstructed = value + up;
+      else if (filter === 3) reconstructed = value + Math.floor((left + up) / 2);
+      else if (filter === 4) reconstructed = value + paethPredictor(left, up, upLeft);
+      else throw new Error(`Unsupported PNG filter ${filter}`);
+      source[rowOffset + xByte] = reconstructed & 0xff;
+    }
+  }
+
+  if (sourceChannels === 4) return { width, height, data: source };
+
+  const rgba = Buffer.alloc(width * height * 4);
+  for (let sourceOffset = 0, targetOffset = 0; sourceOffset < source.length; sourceOffset += 3, targetOffset += 4) {
+    rgba[targetOffset] = source[sourceOffset];
+    rgba[targetOffset + 1] = source[sourceOffset + 1];
+    rgba[targetOffset + 2] = source[sourceOffset + 2];
+    rgba[targetOffset + 3] = 255;
+  }
+  return { width, height, data: rgba };
+}
+
+function paethPredictor(left, up, upLeft) {
+  const estimate = left + up - upLeft;
+  const leftDistance = Math.abs(estimate - left);
+  const upDistance = Math.abs(estimate - up);
+  const upLeftDistance = Math.abs(estimate - upLeft);
+  if (leftDistance <= upDistance && leftDistance <= upLeftDistance) return left;
+  if (upDistance <= upLeftDistance) return up;
+  return upLeft;
 }
 
 async function ensureParentDir(filePath) {

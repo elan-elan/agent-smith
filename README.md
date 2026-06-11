@@ -18,6 +18,14 @@ The root-level insurance claims demo is the current testbed for this skill. See 
 
 [`google-earth-crop`](.agents/skills/google-earth-crop/README.md) captures Google Earth Web crops with Playwright, including historical imagery before a cutoff date. It defaults to centered square neighborhood crops, overlays a red dot at the queried location, writes a JSON sidecar, and includes a 10-location benchmark/eval.
 
+Madison Square Garden history demo:
+
+![Madison Square Garden yearly Google Earth crops](data/madison-square-garden-history.gif)
+
+Prompt used:
+
+`Use google-earth-crop to take screenshot of Madison Square Garden each year from 2016-2025, before December 31 and store the results in data/madison-square-garden-history`
+
 Example prompts:
 
 - `Use the google-earth-crop skill to get an image for "1150 Amsterdam Ave, New York, NY 10027" before 2025-01-01.`
