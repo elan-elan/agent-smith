@@ -91,7 +91,16 @@ export async function cropGoogleEarth(page, options) {
   try {
     const targetCamera = coordinateTarget(location);
     const searchStart = Date.now();
-    await page.goto(searchUrl(location), { waitUntil: 'domcontentloaded', timeout: 30000 });
+    const directCoordinateUrl = targetCamera && previousCamera
+      ? withCamera(page.url(), { ...targetCamera, alt: preferredCameraAltitude })
+      : null;
+    if (directCoordinateUrl) {
+      record.searchStrategy = 'direct-coordinate-url';
+      await page.goto(directCoordinateUrl, { waitUntil: 'commit', timeout: 15000 }).catch(() => {});
+    } else {
+      record.searchStrategy = 'search-url';
+      await page.goto(searchUrl(location), { waitUntil: 'domcontentloaded', timeout: 30000 });
+    }
     const ready = await waitForReady(page, { previousCamera, targetCamera });
     record.searchReadyMs = Date.now() - searchStart;
     record.camera = ready.camera;
@@ -99,14 +108,17 @@ export async function cropGoogleEarth(page, options) {
 
     const patchStart = Date.now();
     const historicalUrl = withHistoricalDate(page.url(), targetDate);
-    const altitudeCandidates = cameraAltitudeCandidates(ready.camera.alt, preferredCameraAltitude);
+    const altitudeCandidates = cameraAltitudeCandidates(ready.camera.alt, preferredCameraAltitude, {
+      allowWiderThanCurrent: record.searchStrategy === 'direct-coordinate-url'
+    });
     record.patchMs = Date.now() - patchStart;
     record.preferredCameraAltitude = preferredCameraAltitude;
     record.cameraAltitudeCandidates = altitudeCandidates;
     record.zoomAttempts = [];
 
     let finalError = null;
-    for (const altitude of altitudeCandidates) {
+    for (let altitudeIndex = 0; altitudeIndex < altitudeCandidates.length; altitudeIndex += 1) {
+      const altitude = altitudeCandidates[altitudeIndex];
       const attempt = { requestedCameraAltitude: altitude };
       record.zoomAttempts.push(attempt);
 
@@ -122,7 +134,11 @@ export async function cropGoogleEarth(page, options) {
         attempt.finalCamera = cameraFromUrl(page.url());
         attempt.historyReadyMs = Date.now() - historyStart;
 
-        await page.waitForTimeout(renderSettleMs);
+        const directCoordinateSettleMs = record.searchStrategy === 'direct-coordinate-url' ? 100 : 0;
+        const ultraCloseSearchSettleMs = record.searchStrategy === 'search-url' && record.camera.alt < ULTRA_CLOSE_CAMERA_ALTITUDE ? 1000 : 0;
+        const attemptRenderSettleMs = renderSettleMs + directCoordinateSettleMs + ultraCloseSearchSettleMs;
+        attempt.renderSettleMs = attemptRenderSettleMs;
+        await page.waitForTimeout(attemptRenderSettleMs);
         await ensureParentDir(outputPath);
         const screenshotStart = Date.now();
         let screenshot = await page.screenshot({ fullPage: false, scale: 'css', clip });
@@ -134,13 +150,22 @@ export async function cropGoogleEarth(page, options) {
         if (attempt.analysis.splash || attempt.analysis.blank || attempt.analysis.lowDetail) {
           attempt.preRetryAnalysis = attempt.analysis;
           attempt.preRetryScreenshotBytes = screenshot.length;
-          const retryStart = Date.now();
-          await page.waitForTimeout(3000);
-          screenshot = await page.screenshot({ fullPage: false, scale: 'css', clip });
-          attempt.retryMs = Date.now() - retryStart;
-          attempt.screenshotBytes = screenshot.length;
-          attempt.analysis = analyzeShot(screenshot, minDetailScore);
-          attempt.retried = true;
+          const skipRetryForWideRecovery = record.searchStrategy === 'direct-coordinate-url'
+            && altitude <= preferredCameraAltitude
+            && altitudeIndex < altitudeCandidates.length - 1
+            && (attempt.analysis.splash || attempt.analysis.blank || attempt.analysis.detailScore < minDetailScore * 0.2);
+          attempt.responsePolicy = skipRetryForWideRecovery ? 'skip-retry-for-wide-recovery' : 'retry-same-altitude';
+          if (skipRetryForWideRecovery) {
+            attempt.retried = false;
+          } else {
+            const retryStart = Date.now();
+            await page.waitForTimeout(3000);
+            screenshot = await page.screenshot({ fullPage: false, scale: 'css', clip });
+            attempt.retryMs = Date.now() - retryStart;
+            attempt.screenshotBytes = screenshot.length;
+            attempt.analysis = analyzeShot(screenshot, minDetailScore);
+            attempt.retried = true;
+          }
         }
 
         copyAttemptToRecord(record, attempt);
@@ -271,12 +296,14 @@ function cameraFromUrl(url) {
   return Number.isFinite(camera.lat) && Number.isFinite(camera.lon) && Number.isFinite(camera.alt) ? camera : null;
 }
 
-function cameraAltitudeCandidates(currentAltitude, preferredAltitude) {
+function cameraAltitudeCandidates(currentAltitude, preferredAltitude, { allowWiderThanCurrent = false } = {}) {
   if (!Number.isFinite(currentAltitude) || currentAltitude <= 0) return [];
   const preferred = Number.isFinite(preferredAltitude) && preferredAltitude > 0 ? preferredAltitude : DEFAULT_PREFERRED_CAMERA_ALTITUDE;
   const ultraCloseInitialCamera = currentAltitude < Math.min(preferred, ULTRA_CLOSE_CAMERA_ALTITUDE);
   const closeInitialCamera = currentAltitude < preferred;
-  const fallbackAltitudes = ultraCloseInitialCamera
+  const fallbackAltitudes = allowWiderThanCurrent && !ultraCloseInitialCamera && !closeInitialCamera
+    ? [preferred, 1500, 2000, 2500, 700, 1000, currentAltitude]
+    : ultraCloseInitialCamera
     ? [preferred, 500, 700, 1000, 1500, 2000, 2500, currentAltitude]
     : closeInitialCamera
       ? [currentAltitude, preferred, 500, 700, 1000, 1500, 2000, 2500]
@@ -285,7 +312,7 @@ function cameraAltitudeCandidates(currentAltitude, preferredAltitude) {
   const candidates = [];
   for (const altitude of fallbackAltitudes) {
     if (!Number.isFinite(altitude) || altitude <= 0) continue;
-    if (!closeInitialCamera && altitude > currentAltitude) continue;
+    if (!allowWiderThanCurrent && !closeInitialCamera && altitude > currentAltitude) continue;
     if (!candidates.some((candidate) => Math.abs(candidate - altitude) < 1e-6)) candidates.push(altitude);
   }
   if (!candidates.length) candidates.push(currentAltitude);
@@ -295,6 +322,12 @@ function cameraAltitudeCandidates(currentAltitude, preferredAltitude) {
 function withCameraAltitude(url, altitude) {
   if (!Number.isFinite(altitude) || altitude <= 0) return url;
   return url.replace(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),([\d.]+)a/, `@$1,$2,${formatAltitude(altitude)}a`);
+}
+
+function withCamera(url, camera) {
+  if (!Number.isFinite(camera?.lat) || !Number.isFinite(camera?.lon) || !Number.isFinite(camera?.alt) || camera.alt <= 0) return null;
+  if (!url.includes('/data=') || !cameraFromUrl(url)) return null;
+  return url.replace(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),([\d.]+)a/, `@${formatCoordinate(camera.lat)},${formatCoordinate(camera.lon)},${formatAltitude(camera.alt)}a`);
 }
 
 function locationMarkerForClip(clip, viewport, { enabled, radius }) {
@@ -324,18 +357,6 @@ async function screenshotWithLocationMarker(page, marker, clip, viewport) {
   const markerId = '__google_earth_crop_marker__';
   const absoluteX = clip.x + marker.x;
   const absoluteY = clip.y + marker.y;
-  const samplePadding = Math.ceil(marker.radius + marker.strokeWidth + 4);
-  const sampleX = Math.max(0, Math.floor(absoluteX - samplePadding));
-  const sampleY = Math.max(0, Math.floor(absoluteY - samplePadding));
-  const sampleRight = Math.min(viewport.width, Math.ceil(absoluteX + samplePadding));
-  const sampleBottom = Math.min(viewport.height, Math.ceil(absoluteY + samplePadding));
-  const sampleClip = {
-    x: sampleX,
-    y: sampleY,
-    width: Math.max(1, sampleRight - sampleX),
-    height: Math.max(1, sampleBottom - sampleY)
-  };
-
   await page.evaluate(async ({ marker, markerId, absoluteX, absoluteY }) => {
     document.getElementById(markerId)?.remove();
     const element = document.createElement('div');
@@ -361,10 +382,8 @@ async function screenshotWithLocationMarker(page, marker, clip, viewport) {
 
   try {
     const screenshot = await page.screenshot({ fullPage: false, scale: 'css', clip });
-    const sample = await page.screenshot({ fullPage: false, scale: 'css', clip: sampleClip });
-    const sampleMarker = { ...marker, x: absoluteX - sampleClip.x, y: absoluteY - sampleClip.y };
-    const pixelCheck = analyzeMarkerPixels(sample, sampleMarker);
-    return { screenshot, sampleClip, pixelCheck };
+    const pixelCheck = analyzeMarkerPixels(screenshot, marker);
+    return { screenshot, pixelCheck };
   } finally {
     await page.evaluate((markerId) => document.getElementById(markerId)?.remove(), markerId).catch(() => {});
   }
@@ -404,6 +423,10 @@ function analyzeMarkerPixels(screenshot, marker) {
 
 function formatAltitude(value) {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(6)));
+}
+
+function formatCoordinate(value) {
+  return String(Number(value.toFixed(7)));
 }
 
 function copyAttemptToRecord(record, attempt) {
