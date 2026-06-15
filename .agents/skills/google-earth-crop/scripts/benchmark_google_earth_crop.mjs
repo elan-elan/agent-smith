@@ -141,6 +141,6 @@ const report = {
 await fs.writeFile(path.join(outputDir, 'benchmark-summary.json'), `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify(summary, null, 2));
 const markersOk = !markLocation || (summary.markerDrawn === locations.length && summary.markerCentered === locations.length);
-const dateLabelsOk = !includeDateLabel || summary.dateLabelIncluded === locations.length;
+const dateLabelsOk = !includeDateLabel || !extractImageryDate || summary.dateLabelIncluded === locations.length;
 const strictCameraAltitudeOk = !strictCameraAltitude || summary.strictCameraAltitudeMatched === locations.length;
 process.exit(isPassingSummary(summary) && summary.total === locations.length && markersOk && dateLabelsOk && strictCameraAltitudeOk ? 0 : 1);

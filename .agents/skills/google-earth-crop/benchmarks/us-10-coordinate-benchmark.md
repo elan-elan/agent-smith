@@ -12,7 +12,7 @@ Purpose: verify that the `google-earth-crop` skill is fast without accepting sta
 - render settle: `3500ms` after selected-date validation
 - minimum detail score: `50`
 - red location marker: enabled by default, radius `7px`
-- visible Google Earth date/status label: enabled by default by appending the bottom status-bar strip to each saved PNG for later OCR
+- visible Google Earth date/status label: enabled by default by OCRing the bottom status-bar strip and overlaying the parsed image date at the top left of each saved PNG
 
 ## Fixed Random US Coordinates
 
@@ -53,7 +53,7 @@ The benchmark runs headless by default. Add `--headed` only when debugging rende
 - Every successful result records `zoomLevel: 19`, `zoomCameraRange: 300`, the ordered `zoomCameraRangeCandidates`, `requestedZoomLevel` or `zoomFallbackStep`, and the final camera range that passed validation.
 - The summary reports how many crops matched the requested zoom, used a lower zoom fallback, or used the large camera fallback.
 - Every result records a visible, centered, pixel-verified red location marker.
-- Every output PNG includes the appended Google Earth bottom status-bar strip containing the visible imagery date/status label for later OCR, and the summary reports `dateLabelIncluded: 10`.
+- Every output PNG remains at the centered crop size and includes a top-left image-date overlay when bottom status-bar OCR parses a date; the summary reports `dateLabelIncluded` as the overlay count.
 - Every final image analysis has `splash: false`, `blank: false`, and `lowDetail: false`.
 - The summary includes `total`, `meanMs`, `medianMs`, `minMs`, `maxMs`, `markerVisible`, `markerDrawn`, `markerCentered`, `dateLabelIncluded`, and per-location timings.
 - Investigate if mean runtime rises above `23000ms` on a normal local connection; square marked outputs include more pixels, canvas overlay, and marker-pixel verification overhead.
@@ -75,4 +75,4 @@ With target-camera readiness and `3500ms` render settle: `10/10` valid crops, me
 
 Earlier `500ms` crops were faster but invalid: they accepted stale Las Vegas coordinates for Dallas/Fargo and saved Google Earth splash screenshots.
 
-With adaptive neighborhood zoom plus centered square crop and red marker overlay/pixel verification: `10/10` valid crops, `markerDrawn: 10`, `markerCentered: 10`, mean about `19554ms`, median about `19788ms`, min about `13887ms`, max about `36159ms`. Current evals use default zoom level `19` and append the visible Google Earth date/status strip, so runtime may differ from this older baseline.
+With adaptive neighborhood zoom plus centered square crop and red marker overlay/pixel verification: `10/10` valid crops, `markerDrawn: 10`, `markerCentered: 10`, mean about `19554ms`, median about `19788ms`, min about `13887ms`, max about `36159ms`. Current evals use default zoom level `19` and overlay the parsed visible Google Earth image date at top left, so runtime may differ from this older baseline.

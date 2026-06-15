@@ -246,9 +246,18 @@ export async function cropGoogleEarth(page, options) {
               retryWaitMs: imageryDateOcrRetryWaitMs
             });
             if (extractImageryDate) dateLabel.ocr = capture.ocr;
-            output = await appendImageStrip(page, output, capture.strip);
-            dateLabel.included = true;
-            dateLabel.position = 'appended-bottom';
+            const overlayText = imageDateOverlayText(dateLabel.ocr);
+            if (overlayText) {
+              const labeled = await overlayImageDateText(page, output, overlayText);
+              output = labeled.image;
+              dateLabel.included = true;
+              dateLabel.position = 'overlay-top-left';
+              dateLabel.overlay = labeled.overlay;
+            } else {
+              dateLabel.included = false;
+              dateLabel.position = null;
+              dateLabel.overlay = null;
+            }
           } catch (error) {
             dateLabel.included = false;
             dateLabel.error = String(error.message || error).slice(0, 200);
@@ -490,8 +499,15 @@ function dateLabelForViewport(clip, viewport, { enabled }) {
       y: Math.max(0, viewport.height - height),
       width: Math.min(viewport.width, Math.max(clip.width, 780)),
       height
-    }
+    },
+    overlay: null
   };
+}
+
+function imageDateOverlayText(ocr) {
+  if (!ocr?.imageryDate) return null;
+  const qualifier = ocr.qualifier ? `${ocr.qualifier} ` : '';
+  return `Image date: ${qualifier}${ocr.imageryDate}`;
 }
 
 export async function extractImageryDateFromStrip(stripPng) {
@@ -857,28 +873,73 @@ async function showHistoricalImageryUi(page) {
   await page.waitForTimeout(1500);
 }
 
-async function appendImageStrip(page, imagePng, stripPng) {
+async function overlayImageDateText(page, imagePng, text) {
   const imageDataUrl = `data:image/png;base64,${imagePng.toString('base64')}`;
-  const stripDataUrl = `data:image/png;base64,${stripPng.toString('base64')}`;
-  const base64 = await page.evaluate(async ({ imageDataUrl, stripDataUrl }) => {
+  const overlay = {
+    text,
+    position: 'top-left',
+    x: 12,
+    y: 12,
+    paddingX: 8,
+    paddingY: 5,
+    borderRadius: 4,
+    font: '600 18px Arial, sans-serif',
+    textColor: '#ffffff',
+    backgroundColor: 'rgba(0, 0, 0, 0.72)'
+  };
+  const result = await page.evaluate(async ({ imageDataUrl, overlay }) => {
     const loadImage = (source) => new Promise((resolve, reject) => {
       const image = new Image();
       image.onload = () => resolve(image);
       image.onerror = () => reject(new Error('Unable to load PNG for composition'));
       image.src = source;
     });
-    const [image, strip] = await Promise.all([loadImage(imageDataUrl), loadImage(stripDataUrl)]);
+    const image = await loadImage(imageDataUrl);
     const canvas = document.createElement('canvas');
     canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight + strip.naturalHeight;
+    canvas.height = image.naturalHeight;
     const context = canvas.getContext('2d');
-    context.fillStyle = '#000000';
-    context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(image, 0, 0);
-    context.drawImage(strip, 0, image.naturalHeight);
-    return canvas.toDataURL('image/png').split(',')[1];
-  }, { imageDataUrl, stripDataUrl });
-  return Buffer.from(base64, 'base64');
+
+    context.font = overlay.font;
+    context.textBaseline = 'top';
+    const metrics = context.measureText(overlay.text);
+    const textHeight = Math.ceil(metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent) || 18;
+    const boxWidth = Math.ceil(metrics.width + overlay.paddingX * 2);
+    const boxHeight = Math.ceil(textHeight + overlay.paddingY * 2 + 2);
+    const boxX = overlay.x;
+    const boxY = overlay.y;
+    const radius = Math.min(overlay.borderRadius, boxWidth / 2, boxHeight / 2);
+
+    context.beginPath();
+    context.moveTo(boxX + radius, boxY);
+    context.lineTo(boxX + boxWidth - radius, boxY);
+    context.quadraticCurveTo(boxX + boxWidth, boxY, boxX + boxWidth, boxY + radius);
+    context.lineTo(boxX + boxWidth, boxY + boxHeight - radius);
+    context.quadraticCurveTo(boxX + boxWidth, boxY + boxHeight, boxX + boxWidth - radius, boxY + boxHeight);
+    context.lineTo(boxX + radius, boxY + boxHeight);
+    context.quadraticCurveTo(boxX, boxY + boxHeight, boxX, boxY + boxHeight - radius);
+    context.lineTo(boxX, boxY + radius);
+    context.quadraticCurveTo(boxX, boxY, boxX + radius, boxY);
+    context.closePath();
+    context.fillStyle = overlay.backgroundColor;
+    context.fill();
+    context.fillStyle = overlay.textColor;
+    context.fillText(overlay.text, boxX + overlay.paddingX, boxY + overlay.paddingY);
+
+    return {
+      base64: canvas.toDataURL('image/png').split(',')[1],
+      overlay: {
+        ...overlay,
+        width: boxWidth,
+        height: boxHeight
+      }
+    };
+  }, { imageDataUrl, overlay });
+  return {
+    image: Buffer.from(result.base64, 'base64'),
+    overlay: result.overlay
+  };
 }
 
 async function screenshotWithLocationMarker(page, marker, clip, viewport) {

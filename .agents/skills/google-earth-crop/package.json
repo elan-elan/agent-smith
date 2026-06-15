@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check scripts/google_earth_crop_core.mjs && node --check scripts/crop_google_earth.mjs && node --check scripts/benchmark_google_earth_crop.mjs && node --check scripts/ocr_date_label.mjs && python -m json.tool package.json >/dev/null && python -m json.tool evals/evals.json >/dev/null && python -m json.tool benchmarks/baseline-2026-06-10.json >/dev/null",
+    "check": "node --check scripts/google_earth_crop_core.mjs && node --check scripts/crop_google_earth.mjs && node --check scripts/crop_permits_batch.mjs && node --check scripts/benchmark_google_earth_crop.mjs && node --check scripts/ocr_date_label.mjs && python -m json.tool package.json >/dev/null && python -m json.tool evals/evals.json >/dev/null && python -m json.tool benchmarks/baseline-2026-06-10.json >/dev/null",
     "install:playwright": "npm install && npx playwright install chromium",
     "crop": "node scripts/crop_google_earth.mjs",
+    "crop:permits-batch": "node scripts/crop_permits_batch.mjs",
     "eval": "node scripts/benchmark_google_earth_crop.mjs --output benchmark-runs/us-10-coordinate",
     "eval:full": "npm install && npx playwright install chromium && node scripts/benchmark_google_earth_crop.mjs --output benchmark-runs/us-10-coordinate"
   },

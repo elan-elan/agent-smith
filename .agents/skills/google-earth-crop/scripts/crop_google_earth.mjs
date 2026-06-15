@@ -154,6 +154,7 @@ function compactCropManifest(cropReport, jsonPath) {
         source: result.dateLabel?.source ?? 'google-earth-visible-bottom-status-bar',
         position: result.dateLabel?.position ?? null,
         clip: result.dateLabel?.clip ?? null,
+        overlay: result.dateLabel?.overlay ?? null,
         ocr: result.dateLabel?.ocr ?? null
       }
     },
@@ -203,8 +204,8 @@ Options:
   --max-camera-altitude        Legacy alias for --preferred-camera-altitude.
   --marker-radius        Red location marker radius in pixels. Default: ${DEFAULT_MARKER_RADIUS}
   --no-marker            Save the crop without the red location marker.
-  --no-date-label        Do not append the visible Google Earth imagery date/status strip. Default: ${DEFAULT_INCLUDE_DATE_LABEL ? 'append strip' : 'skip strip'}.
-  --no-date-ocr          Do not OCR the appended date/status strip. Default: ${DEFAULT_EXTRACT_IMAGERY_DATE ? 'OCR strip' : 'skip OCR'}.
+  --no-date-label        Do not OCR the visible Google Earth imagery date/status strip or overlay the parsed image date. Default: ${DEFAULT_INCLUDE_DATE_LABEL ? 'OCR and overlay date' : 'skip date label'}.
+  --no-date-ocr          Do not OCR the date/status strip, which also disables the image-date text overlay. Default: ${DEFAULT_EXTRACT_IMAGERY_DATE ? 'OCR strip' : 'skip OCR'}.
   --date-ocr-retries     Retry bottom-strip screenshot+OCR when no date is parsed. Default: ${DEFAULT_IMAGERY_DATE_OCR_RETRIES}
   --date-ocr-retry-wait-ms  Wait between OCR retry screenshots. Default: ${DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS}
   --headed               Show Chromium for debugging.
