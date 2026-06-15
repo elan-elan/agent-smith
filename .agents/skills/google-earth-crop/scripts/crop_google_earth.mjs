@@ -5,7 +5,10 @@ import path from 'node:path';
 import {
   DEFAULT_CLIP,
   DEFAULT_CUTOFF_DATE,
+  DEFAULT_EXTRACT_IMAGERY_DATE,
   DEFAULT_INCLUDE_DATE_LABEL,
+  DEFAULT_IMAGERY_DATE_OCR_RETRIES,
+  DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS,
   DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE,
   DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE,
   DEFAULT_MARKER_RADIUS,
@@ -23,7 +26,8 @@ import {
   optionFlag,
   optionValue,
   parseClip,
-  targetDateFor
+  targetDateFor,
+  terminateImageryDateOcrWorker
 } from './google_earth_crop_core.mjs';
 
 const location = optionValue('location') ?? optionValue('loc') ?? positionalLocation();
@@ -42,6 +46,9 @@ const preferredCameraAltitude = Number(explicitPreferredAltitude ?? zoomCameraRa
 const markLocation = !optionFlag('no-marker');
 const markerRadius = Number(optionValue('marker-radius') ?? DEFAULT_MARKER_RADIUS);
 const includeDateLabel = !optionFlag('no-date-label');
+const extractImageryDate = includeDateLabel && !optionFlag('no-date-ocr') && DEFAULT_EXTRACT_IMAGERY_DATE;
+const imageryDateOcrRetries = Number(optionValue('date-ocr-retries') ?? DEFAULT_IMAGERY_DATE_OCR_RETRIES);
+const imageryDateOcrRetryWaitMs = Number(optionValue('date-ocr-retry-wait-ms') ?? DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS);
 const clip = parseClip(optionValue('clip'));
 
 if (!location || optionFlag('help')) {
@@ -71,6 +78,9 @@ try {
     markLocation,
     markerRadius,
     includeDateLabel,
+    extractImageryDate,
+    imageryDateOcrRetries,
+    imageryDateOcrRetryWaitMs,
     clip
   });
 
@@ -89,12 +99,16 @@ try {
     markLocation,
     markerRadius,
     includeDateLabel,
+    extractImageryDate,
+    imageryDateOcrRetries,
+    imageryDateOcrRetryWaitMs,
     viewport: DEFAULT_VIEWPORT,
     clip,
     result
   };
 } finally {
   await browser.close();
+  await terminateImageryDateOcrWorker();
 }
 
 if (summaryPath) {
@@ -139,7 +153,8 @@ function compactCropManifest(cropReport, jsonPath) {
         included: result.dateLabel?.included ?? false,
         source: result.dateLabel?.source ?? 'google-earth-visible-bottom-status-bar',
         position: result.dateLabel?.position ?? null,
-        clip: result.dateLabel?.clip ?? null
+        clip: result.dateLabel?.clip ?? null,
+        ocr: result.dateLabel?.ocr ?? null
       }
     },
     error: result.status === 'ok' ? undefined : result.error,
@@ -151,7 +166,7 @@ function compactCropManifest(cropReport, jsonPath) {
 
 function positionalLocation() {
   const args = process.argv.slice(2);
-  const optionsWithValues = new Set(['--location', '--loc', '--cutoff', '--output', '--out', '--summary', '--clip', '--zoom-level', '--intermediate-fallback-camera-altitude', '--large-fallback-camera-altitude', '--render-settle-ms', '--min-detail-score', '--preferred-camera-altitude', '--max-camera-altitude', '--marker-radius']);
+  const optionsWithValues = new Set(['--location', '--loc', '--cutoff', '--output', '--out', '--summary', '--clip', '--zoom-level', '--intermediate-fallback-camera-altitude', '--large-fallback-camera-altitude', '--render-settle-ms', '--min-detail-score', '--preferred-camera-altitude', '--max-camera-altitude', '--marker-radius', '--date-ocr-retries', '--date-ocr-retry-wait-ms']);
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (optionsWithValues.has(arg)) {
@@ -189,6 +204,9 @@ Options:
   --marker-radius        Red location marker radius in pixels. Default: ${DEFAULT_MARKER_RADIUS}
   --no-marker            Save the crop without the red location marker.
   --no-date-label        Do not append the visible Google Earth imagery date/status strip. Default: ${DEFAULT_INCLUDE_DATE_LABEL ? 'append strip' : 'skip strip'}.
+  --no-date-ocr          Do not OCR the appended date/status strip. Default: ${DEFAULT_EXTRACT_IMAGERY_DATE ? 'OCR strip' : 'skip OCR'}.
+  --date-ocr-retries     Retry bottom-strip screenshot+OCR when no date is parsed. Default: ${DEFAULT_IMAGERY_DATE_OCR_RETRIES}
+  --date-ocr-retry-wait-ms  Wait between OCR retry screenshots. Default: ${DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS}
   --headed               Show Chromium for debugging.
 `);
 }

@@ -17,9 +17,13 @@ export const DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE = 1000;
 export const DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE = 1500;
 export const DEFAULT_MARKER_RADIUS = 7;
 export const DEFAULT_INCLUDE_DATE_LABEL = true;
+export const DEFAULT_EXTRACT_IMAGERY_DATE = true;
+export const DEFAULT_IMAGERY_DATE_OCR_RETRIES = 2;
+export const DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS = 1000;
 const LOWEST_STANDARD_ZOOM_FALLBACK_LEVEL = 18;
 const ULTRA_CLOSE_CAMERA_ALTITUDE = 100;
 const ROOF_ZOOM_LEVEL_RANGE_METERS = 75;
+let imageryDateOcrWorkerPromise = null;
 
 export function optionValue(name, args = process.argv) {
   const index = args.indexOf(`--${name}`);
@@ -85,6 +89,9 @@ export async function cropGoogleEarth(page, options) {
     markLocation = true,
     markerRadius = DEFAULT_MARKER_RADIUS,
     includeDateLabel = DEFAULT_INCLUDE_DATE_LABEL,
+    extractImageryDate = includeDateLabel && DEFAULT_EXTRACT_IMAGERY_DATE,
+    imageryDateOcrRetries = DEFAULT_IMAGERY_DATE_OCR_RETRIES,
+    imageryDateOcrRetryWaitMs = DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS,
     strictCameraAltitude = false,
     clip = DEFAULT_CLIP,
     viewport = DEFAULT_VIEWPORT,
@@ -233,8 +240,13 @@ export async function cropGoogleEarth(page, options) {
         const dateLabel = dateLabelForViewport(clip, viewport, { enabled: includeDateLabel });
         if (dateLabel.enabled) {
           try {
-            const strip = await screenshotImageryDateLabel(page, dateLabel.clip);
-            output = await appendImageStrip(page, output, strip);
+            const capture = await captureImageryDateLabelStrip(page, dateLabel.clip, {
+              extractImageryDate,
+              retries: imageryDateOcrRetries,
+              retryWaitMs: imageryDateOcrRetryWaitMs
+            });
+            if (extractImageryDate) dateLabel.ocr = capture.ocr;
+            output = await appendImageStrip(page, output, capture.strip);
             dateLabel.included = true;
             dateLabel.position = 'appended-bottom';
           } catch (error) {
@@ -295,6 +307,7 @@ export function buildSummary(results) {
     markerDrawn: results.filter((result) => result.marker?.drawn).length,
     markerCentered: results.filter((result) => result.marker?.centered).length,
     dateLabelIncluded: results.filter((result) => result.dateLabel?.included).length,
+    imageryDateExtracted: results.filter((result) => result.dateLabel?.ocr?.imageryDate).length,
     strictCameraAltitudeRequired: strictCameraAltitudeResults.length,
     strictCameraAltitudeMatched: strictCameraAltitudeOk.filter((result) => Math.abs((result.finalCamera?.range ?? Infinity) - result.preferredCameraAltitude) < 1e-6).length,
     zoomFallbackRequired: zoomLevelResults.length,
@@ -481,9 +494,265 @@ function dateLabelForViewport(clip, viewport, { enabled }) {
   };
 }
 
-async function screenshotImageryDateLabel(page, clip) {
+export async function extractImageryDateFromStrip(stripPng) {
+  const worker = await loadImageryDateOcrWorker();
+  const { data } = await worker.recognize(stripPng);
+  const text = normalizeImageryDateOcrText(data.text ?? '');
+  const parsed = parseImageryDateFromOcrText(text);
+  const fallback = parsed ? null : await extractImageryDateFromProcessedStrip(worker, stripPng);
+  return {
+    source: 'tesseract.js-bottom-strip',
+    text,
+    imageryDate: parsed?.imageryDate ?? fallback?.imageryDate ?? null,
+    qualifier: parsed?.qualifier ?? fallback?.qualifier ?? null,
+    confidence: Number.isFinite(data.confidence) ? Number(data.confidence.toFixed(1)) : null,
+    fallback
+  };
+}
+
+export async function extractImageryDateFromAppendedStrip(imagePath, { stripHeight = 42 } = {}) {
+  const worker = await loadImageryDateOcrWorker();
+  const image = await fs.readFile(imagePath);
+  const { width, height } = pngDimensions(image);
+  const rectangle = {
+    left: 0,
+    top: Math.max(0, height - stripHeight),
+    width: Math.min(width, 780),
+    height: Math.min(stripHeight, height)
+  };
+  const { data } = await worker.recognize(image, { rectangle });
+  const text = normalizeImageryDateOcrText(data.text ?? '');
+  const parsed = parseImageryDateFromOcrText(text);
+  const fallback = parsed ? null : await extractImageryDateFromProcessedStrip(worker, cropPngStrip(image, rectangle));
+  return {
+    source: 'tesseract.js-appended-bottom-strip',
+    text,
+    imageryDate: parsed?.imageryDate ?? fallback?.imageryDate ?? null,
+    qualifier: parsed?.qualifier ?? fallback?.qualifier ?? null,
+    confidence: Number.isFinite(data.confidence) ? Number(data.confidence.toFixed(1)) : null,
+    fallback,
+    rectangle
+  };
+}
+
+export async function terminateImageryDateOcrWorker() {
+  if (!imageryDateOcrWorkerPromise) return;
+  const workerPromise = imageryDateOcrWorkerPromise;
+  imageryDateOcrWorkerPromise = null;
+  const worker = await workerPromise.catch(() => null);
+  await worker?.terminate?.();
+}
+
+async function loadImageryDateOcrWorker() {
+  if (!imageryDateOcrWorkerPromise) {
+    imageryDateOcrWorkerPromise = (async () => {
+      const { createWorker, PSM } = await import('tesseract.js');
+      const worker = await createWorker('eng', undefined, {
+        cachePath: path.join(skillDir, 'node_modules', '.cache', 'tesseract')
+      });
+      await worker.setParameters({
+        tessedit_pageseg_mode: PSM.SINGLE_LINE,
+        tessedit_char_whitelist: ' 0123456789/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-<>:.',
+        preserve_interword_spaces: '1'
+      });
+      return worker;
+    })().catch((error) => {
+      imageryDateOcrWorkerPromise = null;
+      throw error;
+    });
+  }
+  return imageryDateOcrWorkerPromise;
+}
+
+function normalizeImageryDateOcrText(text) {
+  return text
+    .replace(/[\u2010-\u2015]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseImageryDateFromOcrText(text) {
+  const match = text.match(/(?:(older|newer|newest|latest)\s*[-<: ]*)?(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{4})/i);
+  if (!match) return null;
+
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const year = Number(match[4]);
+  const imageryDate = mdyToIsoDate(month, day, year);
+  if (!imageryDate) return null;
+
+  return {
+    imageryDate,
+    qualifier: match[1]?.toLowerCase() ?? null
+  };
+}
+
+function mdyToIsoDate(month, day, year) {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+async function extractImageryDateFromProcessedStrip(worker, stripPng) {
+  const candidates = processedStripOcrCandidates(stripPng);
+  let best = null;
+  for (const candidate of candidates) {
+    const { data } = await worker.recognize(candidate.png);
+    const text = normalizeImageryDateOcrText(data.text ?? '');
+    const parsed = parseImageryDateFromOcrText(text);
+    const result = {
+      source: `tesseract.js-processed-bottom-strip:${candidate.name}`,
+      text,
+      imageryDate: parsed?.imageryDate ?? null,
+      qualifier: parsed?.qualifier ?? null,
+      confidence: Number.isFinite(data.confidence) ? Number(data.confidence.toFixed(1)) : null
+    };
+    if (result.imageryDate) return result;
+    if (!best || (result.confidence ?? 0) > (best.confidence ?? 0)) best = result;
+  }
+  return best;
+}
+
+function processedStripOcrCandidates(stripPng) {
+  const { width, height, data } = decodePngRgba(stripPng);
+  return [
+    buildThresholdStripPng(data, width, height, { scale: 3, threshold: 190 }),
+    buildThresholdStripPng(data, width, height, { scale: 2, threshold: 190 }),
+    buildThresholdStripPng(data, width, height, { scale: 3, threshold: 150 })
+  ];
+}
+
+function buildThresholdStripPng(data, width, height, { scale, threshold }) {
+  const outputWidth = width * scale;
+  const outputHeight = height * scale;
+  const pixels = Buffer.alloc(outputWidth * outputHeight);
+  for (let yPosition = 0; yPosition < outputHeight; yPosition += 1) {
+    const sourceY = Math.floor(yPosition / scale);
+    for (let xPosition = 0; xPosition < outputWidth; xPosition += 1) {
+      const sourceX = Math.floor(xPosition / scale);
+      const offset = (sourceY * width + sourceX) * 4;
+      const brightness = 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2];
+      pixels[yPosition * outputWidth + xPosition] = brightness < threshold ? 0 : 255;
+    }
+  }
+  return {
+    name: `scale${scale}-threshold${threshold}`,
+    png: encodeGrayscalePng(outputWidth, outputHeight, pixels)
+  };
+}
+
+function cropPngStrip(image, rectangle) {
+  const { width, height, data } = decodePngRgba(image);
+  const left = Math.max(0, Math.min(width - 1, Math.floor(rectangle.left)));
+  const top = Math.max(0, Math.min(height - 1, Math.floor(rectangle.top)));
+  const cropWidth = Math.max(1, Math.min(width - left, Math.floor(rectangle.width)));
+  const cropHeight = Math.max(1, Math.min(height - top, Math.floor(rectangle.height)));
+  const pixels = Buffer.alloc(cropWidth * cropHeight * 4);
+  for (let yPosition = 0; yPosition < cropHeight; yPosition += 1) {
+    const sourceStart = ((top + yPosition) * width + left) * 4;
+    const sourceEnd = sourceStart + cropWidth * 4;
+    data.copy(pixels, yPosition * cropWidth * 4, sourceStart, sourceEnd);
+  }
+  return encodeRgbaPng(cropWidth, cropHeight, pixels);
+}
+
+function pngDimensions(png) {
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (!png.subarray(0, signature.length).equals(signature)) throw new Error('Invalid PNG signature');
+  return {
+    width: png.readUInt32BE(16),
+    height: png.readUInt32BE(20)
+  };
+}
+
+function encodeGrayscalePng(width, height, pixels) {
+  const rows = Buffer.alloc((width + 1) * height);
+  for (let yPosition = 0; yPosition < height; yPosition += 1) {
+    const rowOffset = yPosition * (width + 1);
+    rows[rowOffset] = 0;
+    pixels.copy(rows, rowOffset + 1, yPosition * width, (yPosition + 1) * width);
+  }
+  return encodePng(width, height, 0, rows);
+}
+
+function encodeRgbaPng(width, height, pixels) {
+  const stride = width * 4;
+  const rows = Buffer.alloc((stride + 1) * height);
+  for (let yPosition = 0; yPosition < height; yPosition += 1) {
+    const rowOffset = yPosition * (stride + 1);
+    rows[rowOffset] = 0;
+    pixels.copy(rows, rowOffset + 1, yPosition * stride, (yPosition + 1) * stride);
+  }
+  return encodePng(width, height, 6, rows);
+}
+
+function encodePng(width, height, colorType, filteredRows) {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = colorType;
+  header[10] = 0;
+  header[11] = 0;
+  header[12] = 0;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', header),
+    pngChunk('IDAT', zlib.deflateSync(filteredRows)),
+    pngChunk('IEND', Buffer.alloc(0))
+  ]);
+}
+
+function pngChunk(type, data) {
+  const chunk = Buffer.alloc(12 + data.length);
+  chunk.writeUInt32BE(data.length, 0);
+  chunk.write(type, 4, 4, 'ascii');
+  data.copy(chunk, 8);
+  chunk.writeUInt32BE(crc32(chunk.subarray(4, 8 + data.length)), 8 + data.length);
+  return chunk;
+}
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+async function captureImageryDateLabelStrip(page, clip, { extractImageryDate, retries, retryWaitMs } = {}) {
   await showHistoricalImageryUi(page);
-  return page.screenshot({ fullPage: false, scale: 'css', clip });
+  const retryLimit = Math.max(0, Math.floor(Number.isFinite(retries) ? retries : DEFAULT_IMAGERY_DATE_OCR_RETRIES));
+  const waitMs = Math.max(0, Math.floor(Number.isFinite(retryWaitMs) ? retryWaitMs : DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS));
+  const maxAttempts = extractImageryDate ? retryLimit + 1 : 1;
+  let latest = null;
+
+  for (let attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber += 1) {
+    const strip = await page.screenshot({ fullPage: false, scale: 'css', clip });
+    if (!extractImageryDate) return { strip, ocr: null };
+
+    let ocr;
+    try {
+      ocr = await extractImageryDateFromStrip(strip);
+    } catch (error) {
+      ocr = { error: String(error.message || error).slice(0, 200) };
+    }
+
+    latest = {
+      strip,
+      ocr: {
+        ...ocr,
+        attempts: attemptNumber,
+        retryLimit
+      }
+    };
+
+    if (ocr.imageryDate || attemptNumber === maxAttempts) return latest;
+    await page.waitForTimeout(waitMs);
+  }
+
+  return latest;
 }
 
 async function screenshotWithoutTransientUi(page, clip) {

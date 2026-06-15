@@ -4,6 +4,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   DEFAULT_CUTOFF_DATE,
+  DEFAULT_EXTRACT_IMAGERY_DATE,
+  DEFAULT_IMAGERY_DATE_OCR_RETRIES,
+  DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS,
   DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE,
   DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE,
   DEFAULT_MARKER_RADIUS,
@@ -21,7 +24,8 @@ import {
   optionFlag,
   optionValue,
   parseClip,
-  targetDateFor
+  targetDateFor,
+  terminateImageryDateOcrWorker
 } from './google_earth_crop_core.mjs';
 
 const outputDir = path.resolve(optionValue('output') ?? 'benchmark-runs/us-10-coordinate');
@@ -39,6 +43,9 @@ const preferredCameraAltitude = Number(explicitPreferredAltitude ?? zoomCameraRa
 const markLocation = !optionFlag('no-marker');
 const markerRadius = Number(optionValue('marker-radius') ?? DEFAULT_MARKER_RADIUS);
 const includeDateLabel = !optionFlag('no-date-label');
+const extractImageryDate = includeDateLabel && !optionFlag('no-date-ocr') && DEFAULT_EXTRACT_IMAGERY_DATE;
+const imageryDateOcrRetries = Number(optionValue('date-ocr-retries') ?? DEFAULT_IMAGERY_DATE_OCR_RETRIES);
+const imageryDateOcrRetryWaitMs = Number(optionValue('date-ocr-retry-wait-ms') ?? DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS);
 const strictCameraAltitude = Boolean(zoomLevel) && optionFlag('strict-zoom');
 const viewport = DEFAULT_VIEWPORT;
 const clip = parseClip(optionValue('clip'));
@@ -84,6 +91,9 @@ try {
       markLocation,
       markerRadius,
       includeDateLabel,
+      extractImageryDate,
+      imageryDateOcrRetries,
+      imageryDateOcrRetryWaitMs,
       strictCameraAltitude,
       clip,
       previousCamera: lastConfirmedCamera,
@@ -97,6 +107,7 @@ try {
   }
 } finally {
   await browser.close();
+  await terminateImageryDateOcrWorker();
 }
 
 const summary = buildSummary(perLocation);
@@ -115,6 +126,9 @@ const report = {
   markLocation,
   markerRadius,
   includeDateLabel,
+  extractImageryDate,
+  imageryDateOcrRetries,
+  imageryDateOcrRetryWaitMs,
   strictCameraAltitude,
   viewport,
   clip,
