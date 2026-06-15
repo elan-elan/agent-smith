@@ -4,7 +4,7 @@ Human-facing guide for prompting the `google-earth-crop` skill. Agent instructio
 
 This skill captures Google Earth Web crops for places or coordinates, including historical imagery at the newest timeline date before a cutoff date. It saves a marked PNG plus a JSON sidecar with the selected date, camera, red-dot marker metadata, output path, timing, and image-quality checks.
 
-Default framing is a centered square neighborhood crop around the target, usually a few buildings rather than a city-scale map. If close historical imagery is blank or low-detail, the skill widens the camera until the crop passes image checks.
+Default framing starts at zoom level 19 as a centered square neighborhood crop around the target, usually a few buildings rather than a city-scale map. If close historical imagery is blank or low-detail, the skill tries zoom 18, then 1000m with one same-range retry, then 1500m.
 
 ## How To Prompt It
 

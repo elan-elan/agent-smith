@@ -179,7 +179,7 @@ Options:
   --summary              JSON report path. Default: output path with .json extension.
   --no-summary           Do not write a JSON report.
   --clip                 Crop rectangle as x,y,width,height. Default: ${DEFAULT_CLIP.x},${DEFAULT_CLIP.y},${DEFAULT_CLIP.width},${DEFAULT_CLIP.height}
-  --zoom-level           Approximate web-map zoom level. Default: ${DEFAULT_ZOOM_LEVEL}. Falls back to the next two lower zoom levels, then intermediate and large recovery ranges.
+  --zoom-level           Approximate web-map zoom level. Default: ${DEFAULT_ZOOM_LEVEL}. Falls back through zoom 18, then 1000m with one retry, then 1500m.
   --intermediate-fallback-camera-altitude  Recovery range in meters before the final large fallback. Default: ${DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE}
   --large-fallback-camera-altitude  Final recovery range in meters after zoom fallbacks fail. Default: ${DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE}
   --render-settle-ms     Wait after date validation. Default: ${DEFAULT_RENDER_SETTLE_MS}

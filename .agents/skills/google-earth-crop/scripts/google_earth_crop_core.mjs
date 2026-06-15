@@ -11,12 +11,13 @@ export const DEFAULT_CUTOFF_DATE = '2020-01-01';
 export const DEFAULT_RENDER_SETTLE_MS = 3500;
 export const DEFAULT_MIN_DETAIL_SCORE = 50;
 export const DEFAULT_PREFERRED_CAMERA_ALTITUDE = 500;
-export const DEFAULT_ZOOM_LEVEL = 20;
+export const DEFAULT_ZOOM_LEVEL = 19;
 export const DEFAULT_ROOF_ZOOM_LEVEL = 21;
 export const DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE = 1000;
 export const DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE = 1500;
 export const DEFAULT_MARKER_RADIUS = 7;
 export const DEFAULT_INCLUDE_DATE_LABEL = true;
+const LOWEST_STANDARD_ZOOM_FALLBACK_LEVEL = 18;
 const ULTRA_CLOSE_CAMERA_ALTITUDE = 100;
 const ROOF_ZOOM_LEVEL_RANGE_METERS = 75;
 
@@ -179,7 +180,9 @@ export async function cropGoogleEarth(page, options) {
         await page.waitForTimeout(attemptRenderSettleMs);
         await ensureParentDir(outputPath);
         const screenshotStart = Date.now();
-        let screenshot = await page.screenshot({ fullPage: false, scale: 'css', clip });
+        const cleanShot = await screenshotWithoutTransientUi(page, clip);
+        let screenshot = cleanShot.screenshot;
+        recordTransientUiDismissal(attempt, cleanShot.transientUi);
         attempt.screenshotMs = Date.now() - screenshotStart;
         attempt.screenshotBytes = screenshot.length;
         attempt.analysis = analyzeShot(screenshot, minDetailScore);
@@ -198,7 +201,9 @@ export async function cropGoogleEarth(page, options) {
           } else {
             const retryStart = Date.now();
             await page.waitForTimeout(3000);
-            screenshot = await page.screenshot({ fullPage: false, scale: 'css', clip });
+            const cleanRetryShot = await screenshotWithoutTransientUi(page, clip);
+            screenshot = cleanRetryShot.screenshot;
+            recordTransientUiDismissal(attempt, cleanRetryShot.transientUi);
             attempt.retryMs = Date.now() - retryStart;
             attempt.screenshotBytes = screenshot.length;
             attempt.analysis = analyzeShot(screenshot, minDetailScore);
@@ -217,6 +222,7 @@ export async function cropGoogleEarth(page, options) {
           const overlayStart = Date.now();
           const marked = await screenshotWithLocationMarker(page, marker, clip, viewport);
           output = marked.screenshot;
+          recordTransientUiDismissal(attempt, marked.transientUi);
           marker.overlayMs = Date.now() - overlayStart;
           marker.sampleClip = marked.sampleClip;
           marker.pixelCheck = marked.pixelCheck;
@@ -326,13 +332,12 @@ function zoomLevelCameraCandidates(zoomLevel, {
   largeFallbackCameraAltitude = DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE
 } = {}) {
   const candidates = [];
-  for (let offset = 0; offset <= 2; offset += 1) {
-    const candidateZoomLevel = zoomLevel - offset;
-    if (candidateZoomLevel <= 0) continue;
+  const lowestZoomFallbackLevel = Math.max(Math.min(zoomLevel, LOWEST_STANDARD_ZOOM_FALLBACK_LEVEL), zoomLevel - 2);
+  for (let candidateZoomLevel = zoomLevel; candidateZoomLevel >= lowestZoomFallbackLevel; candidateZoomLevel -= 1) {
     candidates.push({
       cameraAltitude: cameraRangeForZoomLevel(candidateZoomLevel),
       zoomLevel: candidateZoomLevel,
-      fallbackStep: offset === 0 ? 'requested-zoom' : 'lower-zoom-fallback'
+      fallbackStep: candidateZoomLevel === zoomLevel ? 'requested-zoom' : 'lower-zoom-fallback'
     });
   }
   const intermediateFallback = Number(intermediateFallbackCameraAltitude);
@@ -481,6 +486,99 @@ async function screenshotImageryDateLabel(page, clip) {
   return page.screenshot({ fullPage: false, scale: 'css', clip });
 }
 
+async function screenshotWithoutTransientUi(page, clip) {
+  const screenshot = await page.screenshot({ fullPage: false, scale: 'css', clip });
+  const transientUi = detectAskGoogleEarthHelpPopup(screenshot);
+  if (!transientUi.detected) return { screenshot, transientUi };
+
+  await page.mouse.click(clip.x + transientUi.dismiss.x, clip.y + transientUi.dismiss.y).catch(() => {});
+  await page.waitForTimeout(500);
+  const cleanedScreenshot = await page.screenshot({ fullPage: false, scale: 'css', clip });
+  const cleanedUi = detectAskGoogleEarthHelpPopup(cleanedScreenshot);
+  return {
+    screenshot: cleanedScreenshot,
+    transientUi: {
+      ...transientUi,
+      dismissed: true,
+      stillDetectedAfterDismiss: cleanedUi.detected
+    }
+  };
+}
+
+function recordTransientUiDismissal(attempt, transientUi) {
+  if (!transientUi?.detected) return;
+  attempt.transientUiDismissals = attempt.transientUiDismissals ?? [];
+  attempt.transientUiDismissals.push(transientUi);
+}
+
+function detectAskGoogleEarthHelpPopup(screenshot) {
+  const { width, height, data } = decodePngRgba(screenshot);
+  const scanHeight = Math.floor(Math.min(width, height) * 0.42);
+  const xMin = Math.floor(width * 0.35);
+  const xMax = Math.floor(width * 0.98);
+  let bestRun = { length: 0, y: 0, start: 0, end: 0 };
+
+  for (let yPosition = 0; yPosition < scanHeight; yPosition += 2) {
+    let runStart = null;
+    for (let xPosition = xMin; xPosition < xMax; xPosition += 1) {
+      const offset = (yPosition * width + xPosition) * 4;
+      if (isGoogleEarthHelpPopupBackground(data[offset], data[offset + 1], data[offset + 2])) {
+        if (runStart === null) runStart = xPosition;
+      } else if (runStart !== null) {
+        const length = xPosition - runStart;
+        if (length > bestRun.length) bestRun = { length, y: yPosition, start: runStart, end: xPosition - 1 };
+        runStart = null;
+      }
+    }
+    if (runStart !== null) {
+      const length = xMax - runStart;
+      if (length > bestRun.length) bestRun = { length, y: yPosition, start: runStart, end: xMax - 1 };
+    }
+  }
+
+  const minimumRun = Math.min(240, width * 0.28);
+  if (bestRun.length < minimumRun) return { type: 'ask-google-earth-help', detected: false };
+
+  let top = null;
+  let bottom = null;
+  for (let yPosition = 0; yPosition < scanHeight; yPosition += 2) {
+    let hits = 0;
+    let total = 0;
+    for (let xPosition = bestRun.start; xPosition <= bestRun.end; xPosition += 4) {
+      const offset = (yPosition * width + xPosition) * 4;
+      total += 1;
+      if (isGoogleEarthHelpPopupBackground(data[offset], data[offset + 1], data[offset + 2])) hits += 1;
+    }
+
+    if (hits / Math.max(total, 1) > 0.45) {
+      if (top === null) top = yPosition;
+      bottom = yPosition;
+    }
+  }
+
+  const cardHeight = top === null || bottom === null ? 0 : bottom - top;
+  const detected = cardHeight > Math.min(110, height * 0.18) && bestRun.start > width * 0.35 && bestRun.end < width * 0.98;
+  return {
+    type: 'ask-google-earth-help',
+    detected,
+    dismissed: false,
+    bounds: detected ? { x: bestRun.start, y: top, width: bestRun.length, height: cardHeight } : undefined,
+    dismiss: detected ? {
+      x: Math.round(bestRun.start + bestRun.length * 0.5),
+      y: Math.round(bottom - cardHeight * 0.18)
+    } : undefined
+  };
+}
+
+function isGoogleEarthHelpPopupBackground(red, green, blue) {
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const brightness = (red + green + blue) / 3;
+  const neutralLight = brightness > 224 && max - min < 32;
+  const paleBlue = red > 175 && red < 235 && green > 200 && blue > 215 && blue - red > 8;
+  return neutralLight || paleBlue;
+}
+
 async function showHistoricalImageryUi(page) {
   await page.mouse.click(45, 150).catch(() => {});
   await page.waitForTimeout(300);
@@ -542,9 +640,10 @@ async function screenshotWithLocationMarker(page, marker, clip, viewport) {
   }, { marker, markerId, absoluteX, absoluteY });
 
   try {
-    const screenshot = await page.screenshot({ fullPage: false, scale: 'css', clip });
+    const cleanShot = await screenshotWithoutTransientUi(page, clip);
+    const screenshot = cleanShot.screenshot;
     const pixelCheck = analyzeMarkerPixels(screenshot, marker);
-    return { screenshot, pixelCheck };
+    return { screenshot, pixelCheck, transientUi: cleanShot.transientUi };
   } finally {
     await page.evaluate((markerId) => document.getElementById(markerId)?.remove(), markerId).catch(() => {});
   }
@@ -605,6 +704,7 @@ function copyAttemptToRecord(record, attempt) {
   record.analysis = attempt.analysis;
   record.marker = attempt.marker;
   record.dateLabel = attempt.dateLabel;
+  record.transientUiDismissals = attempt.transientUiDismissals;
   record.retried = attempt.retried;
   if (attempt.retryMs) record.retryMs = attempt.retryMs;
 }
