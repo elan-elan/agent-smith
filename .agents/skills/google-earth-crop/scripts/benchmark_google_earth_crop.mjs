@@ -4,12 +4,16 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   DEFAULT_CUTOFF_DATE,
+  DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE,
+  DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE,
   DEFAULT_MARKER_RADIUS,
   DEFAULT_MIN_DETAIL_SCORE,
   DEFAULT_PREFERRED_CAMERA_ALTITUDE,
   DEFAULT_RENDER_SETTLE_MS,
   DEFAULT_VIEWPORT,
+  DEFAULT_ZOOM_LEVEL,
   buildSummary,
+  cameraRangeForZoomLevel,
   cropGoogleEarth,
   isPassingSummary,
   launchChromium,
@@ -25,10 +29,17 @@ const imageDir = path.join(outputDir, 'images');
 const cutoffDate = optionValue('cutoff') ?? DEFAULT_CUTOFF_DATE;
 const targetDate = targetDateFor(cutoffDate);
 const renderSettleMs = Number(optionValue('render-settle-ms') ?? DEFAULT_RENDER_SETTLE_MS);
-const minDetailScore = Number(optionValue('min-detail-score') ?? DEFAULT_MIN_DETAIL_SCORE);
-const preferredCameraAltitude = Number(optionValue('preferred-camera-altitude') ?? optionValue('max-camera-altitude') ?? DEFAULT_PREFERRED_CAMERA_ALTITUDE);
+const explicitPreferredAltitude = optionValue('preferred-camera-altitude') ?? optionValue('max-camera-altitude');
+const zoomLevel = optionValue('zoom-level') ? Number(optionValue('zoom-level')) : (explicitPreferredAltitude ? null : DEFAULT_ZOOM_LEVEL);
+const zoomCameraRange = cameraRangeForZoomLevel(zoomLevel);
+const intermediateFallbackCameraAltitude = Number(optionValue('intermediate-fallback-camera-altitude') ?? DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE);
+const largeFallbackCameraAltitude = Number(optionValue('large-fallback-camera-altitude') ?? DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE);
+const minDetailScore = Number(optionValue('min-detail-score') ?? (zoomLevel && zoomLevel >= DEFAULT_ZOOM_LEVEL ? 40 : DEFAULT_MIN_DETAIL_SCORE));
+const preferredCameraAltitude = Number(explicitPreferredAltitude ?? zoomCameraRange ?? DEFAULT_PREFERRED_CAMERA_ALTITUDE);
 const markLocation = !optionFlag('no-marker');
 const markerRadius = Number(optionValue('marker-radius') ?? DEFAULT_MARKER_RADIUS);
+const includeDateLabel = !optionFlag('no-date-label');
+const strictCameraAltitude = Boolean(zoomLevel) && optionFlag('strict-zoom');
 const viewport = DEFAULT_VIEWPORT;
 const clip = parseClip(optionValue('clip'));
 const benchmarkLocations = [
@@ -67,8 +78,13 @@ try {
       renderSettleMs,
       minDetailScore,
       preferredCameraAltitude,
+      zoomLevel,
+      intermediateFallbackCameraAltitude,
+      largeFallbackCameraAltitude,
       markLocation,
       markerRadius,
+      includeDateLabel,
+      strictCameraAltitude,
       clip,
       previousCamera: lastConfirmedCamera,
       index: location.index,
@@ -88,11 +104,18 @@ const report = {
   date: new Date().toISOString(),
   cutoffDate,
   targetDate,
+  zoomLevel,
+  zoomCameraRange,
+  zoomCameraRangeCandidates: perLocation[0]?.zoomCameraRangeCandidates ?? null,
+  intermediateFallbackCameraAltitude,
+  largeFallbackCameraAltitude,
   renderSettleMs,
   minDetailScore,
   preferredCameraAltitude,
   markLocation,
   markerRadius,
+  includeDateLabel,
+  strictCameraAltitude,
   viewport,
   clip,
   locations: locations.map((location) => location.query),
@@ -104,4 +127,6 @@ const report = {
 await fs.writeFile(path.join(outputDir, 'benchmark-summary.json'), `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify(summary, null, 2));
 const markersOk = !markLocation || (summary.markerDrawn === locations.length && summary.markerCentered === locations.length);
-process.exit(isPassingSummary(summary) && summary.total === locations.length && markersOk ? 0 : 1);
+const dateLabelsOk = !includeDateLabel || summary.dateLabelIncluded === locations.length;
+const strictCameraAltitudeOk = !strictCameraAltitude || summary.strictCameraAltitudeMatched === locations.length;
+process.exit(isPassingSummary(summary) && summary.total === locations.length && markersOk && dateLabelsOk && strictCameraAltitudeOk ? 0 : 1);

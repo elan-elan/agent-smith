@@ -11,8 +11,14 @@ export const DEFAULT_CUTOFF_DATE = '2020-01-01';
 export const DEFAULT_RENDER_SETTLE_MS = 3500;
 export const DEFAULT_MIN_DETAIL_SCORE = 50;
 export const DEFAULT_PREFERRED_CAMERA_ALTITUDE = 500;
+export const DEFAULT_ZOOM_LEVEL = 20;
+export const DEFAULT_ROOF_ZOOM_LEVEL = 21;
+export const DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE = 1000;
+export const DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE = 1500;
 export const DEFAULT_MARKER_RADIUS = 7;
+export const DEFAULT_INCLUDE_DATE_LABEL = true;
 const ULTRA_CLOSE_CAMERA_ALTITUDE = 100;
+const ROOF_ZOOM_LEVEL_RANGE_METERS = 75;
 
 export function optionValue(name, args = process.argv) {
   const index = args.indexOf(`--${name}`);
@@ -72,8 +78,13 @@ export async function cropGoogleEarth(page, options) {
     renderSettleMs = DEFAULT_RENDER_SETTLE_MS,
     minDetailScore = DEFAULT_MIN_DETAIL_SCORE,
     preferredCameraAltitude = options.maxCameraAltitude ?? DEFAULT_PREFERRED_CAMERA_ALTITUDE,
+    zoomLevel = null,
+    intermediateFallbackCameraAltitude = DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE,
+    largeFallbackCameraAltitude = DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE,
     markLocation = true,
     markerRadius = DEFAULT_MARKER_RADIUS,
+    includeDateLabel = DEFAULT_INCLUDE_DATE_LABEL,
+    strictCameraAltitude = false,
     clip = DEFAULT_CLIP,
     viewport = DEFAULT_VIEWPORT,
     previousCamera = null,
@@ -83,6 +94,9 @@ export async function cropGoogleEarth(page, options) {
 
   if (!location) throw new Error('Missing required location');
   if (!outputPath) throw new Error('Missing required outputPath');
+
+  await ensureParentDir(outputPath);
+  await fs.rm(outputPath, { force: true });
 
   const targetDate = targetDateFor(cutoffDate);
   const record = { index, label, query: location, outputPath };
@@ -108,18 +122,41 @@ export async function cropGoogleEarth(page, options) {
 
     const patchStart = Date.now();
     const historicalUrl = withHistoricalDate(page.url(), targetDate);
-    const altitudeCandidates = cameraAltitudeCandidates(ready.camera.alt, preferredCameraAltitude, {
-      allowWiderThanCurrent: record.searchStrategy === 'direct-coordinate-url'
-    });
+    const requestedZoomLevel = normalizedZoomLevel(zoomLevel);
+    const zoomCameraCandidates = requestedZoomLevel && !strictCameraAltitude
+      ? zoomLevelCameraCandidates(requestedZoomLevel, { intermediateFallbackCameraAltitude, largeFallbackCameraAltitude })
+      : null;
+    const cameraCandidates = zoomCameraCandidates
+      ?? (strictCameraAltitude
+        ? [{ cameraAltitude: preferredCameraAltitude, zoomLevel: requestedZoomLevel, fallbackStep: 'strict-zoom' }]
+        : cameraAltitudeCandidates(ready.camera.alt, preferredCameraAltitude, {
+          allowWiderThanCurrent: record.searchStrategy === 'direct-coordinate-url'
+        }).map((cameraAltitude) => ({ cameraAltitude, zoomLevel: null, fallbackStep: 'adaptive-altitude' })));
+    const altitudeCandidates = cameraCandidates.map((candidate) => candidate.cameraAltitude);
     record.patchMs = Date.now() - patchStart;
     record.preferredCameraAltitude = preferredCameraAltitude;
+    record.zoomLevel = requestedZoomLevel;
+    record.zoomFallbackEnabled = Boolean(zoomCameraCandidates);
+    record.intermediateFallbackCameraAltitude = zoomCameraCandidates ? intermediateFallbackCameraAltitude : null;
+    record.largeFallbackCameraAltitude = zoomCameraCandidates ? largeFallbackCameraAltitude : null;
+    record.zoomCameraRangeCandidates = zoomCameraCandidates?.map((candidate) => ({
+      zoomLevel: candidate.zoomLevel,
+      cameraRange: candidate.cameraAltitude,
+      fallbackStep: candidate.fallbackStep
+    }));
+    record.strictCameraAltitude = strictCameraAltitude;
     record.cameraAltitudeCandidates = altitudeCandidates;
     record.zoomAttempts = [];
 
     let finalError = null;
     for (let altitudeIndex = 0; altitudeIndex < altitudeCandidates.length; altitudeIndex += 1) {
-      const altitude = altitudeCandidates[altitudeIndex];
-      const attempt = { requestedCameraAltitude: altitude };
+      const candidate = cameraCandidates[altitudeIndex];
+      const altitude = candidate.cameraAltitude;
+      const attempt = {
+        requestedCameraAltitude: altitude,
+        requestedZoomLevel: candidate.zoomLevel,
+        zoomFallbackStep: candidate.fallbackStep
+      };
       record.zoomAttempts.push(attempt);
 
       try {
@@ -132,6 +169,7 @@ export async function cropGoogleEarth(page, options) {
         if (selectedDate !== targetDate) throw new Error(`selected date ${selectedDate} !== target ${targetDate}`);
         attempt.selectedDate = selectedDate;
         attempt.finalCamera = cameraFromUrl(page.url());
+        attempt.finalZoomLevel = Math.abs((attempt.finalCamera?.range ?? Infinity) - altitude) < 1e-6 ? candidate.zoomLevel : null;
         attempt.historyReadyMs = Date.now() - historyStart;
 
         const directCoordinateSettleMs = record.searchStrategy === 'direct-coordinate-url' ? 100 : 0;
@@ -151,7 +189,7 @@ export async function cropGoogleEarth(page, options) {
           attempt.preRetryAnalysis = attempt.analysis;
           attempt.preRetryScreenshotBytes = screenshot.length;
           const skipRetryForWideRecovery = record.searchStrategy === 'direct-coordinate-url'
-            && altitude <= preferredCameraAltitude
+            && candidate.fallbackStep !== 'intermediate-fallback'
             && altitudeIndex < altitudeCandidates.length - 1
             && (attempt.analysis.splash || attempt.analysis.blank || attempt.analysis.detailScore < minDetailScore * 0.2);
           attempt.responsePolicy = skipRetryForWideRecovery ? 'skip-retry-for-wide-recovery' : 'retry-same-altitude';
@@ -186,6 +224,19 @@ export async function cropGoogleEarth(page, options) {
           if (!marker.drawn) throw new Error(`location marker overlay not detected: ${marker.pixelCheck.redPixels} red pixels`);
         }
         attempt.marker = marker;
+        const dateLabel = dateLabelForViewport(clip, viewport, { enabled: includeDateLabel });
+        if (dateLabel.enabled) {
+          try {
+            const strip = await screenshotImageryDateLabel(page, dateLabel.clip);
+            output = await appendImageStrip(page, output, strip);
+            dateLabel.included = true;
+            dateLabel.position = 'appended-bottom';
+          } catch (error) {
+            dateLabel.included = false;
+            dateLabel.error = String(error.message || error).slice(0, 200);
+          }
+        }
+        attempt.dateLabel = dateLabel;
         attempt.outputBytes = output.length;
         await fs.writeFile(outputPath, output);
         copyAttemptToRecord(record, attempt);
@@ -216,6 +267,10 @@ export function buildSummary(results) {
   const ok = results.filter((result) => result.status === 'ok');
   const totalTimes = ok.map((result) => result.totalMs).sort((left, right) => left - right);
   const detailScores = results.map((result) => result.analysis?.detailScore).filter(Number.isFinite);
+  const strictCameraAltitudeResults = results.filter((result) => result.strictCameraAltitude);
+  const strictCameraAltitudeOk = ok.filter((result) => result.strictCameraAltitude);
+  const zoomLevelResults = results.filter((result) => Number.isFinite(result.zoomLevel));
+  const zoomLevelOk = ok.filter((result) => Number.isFinite(result.zoomLevel));
   const total = results.length;
 
   return {
@@ -233,6 +288,14 @@ export function buildSummary(results) {
     markerVisible: results.filter((result) => result.marker?.visible).length,
     markerDrawn: results.filter((result) => result.marker?.drawn).length,
     markerCentered: results.filter((result) => result.marker?.centered).length,
+    dateLabelIncluded: results.filter((result) => result.dateLabel?.included).length,
+    strictCameraAltitudeRequired: strictCameraAltitudeResults.length,
+    strictCameraAltitudeMatched: strictCameraAltitudeOk.filter((result) => Math.abs((result.finalCamera?.range ?? Infinity) - result.preferredCameraAltitude) < 1e-6).length,
+    zoomFallbackRequired: zoomLevelResults.length,
+    requestedZoomLevelMatched: zoomLevelOk.filter((result) => Number.isFinite(result.finalZoomLevel) && Math.abs(result.finalZoomLevel - result.zoomLevel) < 1e-6).length,
+    lowerZoomFallbackUsed: zoomLevelOk.filter((result) => Number.isFinite(result.finalZoomLevel) && result.finalZoomLevel < result.zoomLevel).length,
+    intermediateCameraFallbackUsed: zoomLevelOk.filter((result) => result.zoomFallbackStep === 'intermediate-fallback').length,
+    largeCameraFallbackUsed: zoomLevelOk.filter((result) => result.zoomFallbackStep === 'large-fallback').length,
     retries: results.filter((result) => result.retried).length
   };
 }
@@ -245,6 +308,48 @@ export function targetDateFor(iso) {
   const date = new Date(`${iso}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() - 1);
   return date.toISOString().slice(0, 10);
+}
+
+export function cameraRangeForZoomLevel(zoomLevel) {
+  const zoom = Number(zoomLevel);
+  if (!Number.isFinite(zoom) || zoom <= 0) return null;
+  return ROOF_ZOOM_LEVEL_RANGE_METERS * 2 ** (DEFAULT_ROOF_ZOOM_LEVEL - zoom);
+}
+
+function normalizedZoomLevel(value) {
+  const zoom = Number(value);
+  return Number.isFinite(zoom) && zoom > 0 ? zoom : null;
+}
+
+function zoomLevelCameraCandidates(zoomLevel, {
+  intermediateFallbackCameraAltitude = DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE,
+  largeFallbackCameraAltitude = DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE
+} = {}) {
+  const candidates = [];
+  for (let offset = 0; offset <= 2; offset += 1) {
+    const candidateZoomLevel = zoomLevel - offset;
+    if (candidateZoomLevel <= 0) continue;
+    candidates.push({
+      cameraAltitude: cameraRangeForZoomLevel(candidateZoomLevel),
+      zoomLevel: candidateZoomLevel,
+      fallbackStep: offset === 0 ? 'requested-zoom' : 'lower-zoom-fallback'
+    });
+  }
+  const intermediateFallback = Number(intermediateFallbackCameraAltitude);
+  if (Number.isFinite(intermediateFallback) && intermediateFallback > 0) {
+    candidates.push({ cameraAltitude: intermediateFallback, zoomLevel: null, fallbackStep: 'intermediate-fallback' });
+  }
+  const largeFallback = Number(largeFallbackCameraAltitude);
+  if (Number.isFinite(largeFallback) && largeFallback > 0) {
+    candidates.push({ cameraAltitude: largeFallback, zoomLevel: null, fallbackStep: 'large-fallback' });
+  }
+
+  const uniqueCandidates = [];
+  for (const candidate of candidates) {
+    if (!Number.isFinite(candidate.cameraAltitude) || candidate.cameraAltitude <= 0) continue;
+    if (!uniqueCandidates.some((existing) => Math.abs(existing.cameraAltitude - candidate.cameraAltitude) < 1e-6)) uniqueCandidates.push(candidate);
+  }
+  return uniqueCandidates;
 }
 
 async function waitForReady(page, { previousCamera, targetCamera }) {
@@ -290,9 +395,10 @@ function cameraDistance(camera, target) {
 }
 
 function cameraFromUrl(url) {
-  const match = url.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),([\d.]+)a/);
+  const match = url.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),([\d.]+)a(?:,([\d.]+)d)?/);
   if (!match) return null;
-  const camera = { lat: Number(match[1]), lon: Number(match[2]), alt: Number(match[3]) };
+  const camera = { lat: Number(match[1]), lon: Number(match[2]), alt: Number(match[3]), range: Number(match[4]) };
+  if (!Number.isFinite(camera.range)) delete camera.range;
   return Number.isFinite(camera.lat) && Number.isFinite(camera.lon) && Number.isFinite(camera.alt) ? camera : null;
 }
 
@@ -321,13 +427,14 @@ function cameraAltitudeCandidates(currentAltitude, preferredAltitude, { allowWid
 
 function withCameraAltitude(url, altitude) {
   if (!Number.isFinite(altitude) || altitude <= 0) return url;
-  return url.replace(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),([\d.]+)a/, `@$1,$2,${formatAltitude(altitude)}a`);
+  return url.replace(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),([\d.]+)a(?:,([\d.]+)d)?/, `@$1,$2,${formatAltitude(altitude)}a,${formatAltitude(altitude)}d`);
 }
 
 function withCamera(url, camera) {
   if (!Number.isFinite(camera?.lat) || !Number.isFinite(camera?.lon) || !Number.isFinite(camera?.alt) || camera.alt <= 0) return null;
   if (!url.includes('/data=') || !cameraFromUrl(url)) return null;
-  return url.replace(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),([\d.]+)a/, `@${formatCoordinate(camera.lat)},${formatCoordinate(camera.lon)},${formatAltitude(camera.alt)}a`);
+  const range = Number.isFinite(camera.range) && camera.range > 0 ? camera.range : camera.alt;
+  return url.replace(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),([\d.]+)a(?:,([\d.]+)d)?/, `@${formatCoordinate(camera.lat)},${formatCoordinate(camera.lon)},${formatAltitude(camera.alt)}a,${formatAltitude(range)}d`);
 }
 
 function locationMarkerForClip(clip, viewport, { enabled, radius }) {
@@ -351,6 +458,60 @@ function locationMarkerForClip(clip, viewport, { enabled, radius }) {
     strokeWidth: 2,
     visible: x >= 0 && x <= clip.width && y >= 0 && y <= clip.height
   };
+}
+
+function dateLabelForViewport(clip, viewport, { enabled }) {
+  const height = 42;
+  return {
+    enabled,
+    included: false,
+    source: 'google-earth-visible-bottom-status-bar',
+    position: null,
+    clip: {
+      x: 0,
+      y: Math.max(0, viewport.height - height),
+      width: Math.min(viewport.width, Math.max(clip.width, 780)),
+      height
+    }
+  };
+}
+
+async function screenshotImageryDateLabel(page, clip) {
+  await showHistoricalImageryUi(page);
+  return page.screenshot({ fullPage: false, scale: 'css', clip });
+}
+
+async function showHistoricalImageryUi(page) {
+  await page.mouse.click(45, 150).catch(() => {});
+  await page.waitForTimeout(300);
+  await page.mouse.click(176.5, 16);
+  await page.waitForTimeout(500);
+  await page.mouse.click(294, 140);
+  await page.waitForTimeout(1500);
+}
+
+async function appendImageStrip(page, imagePng, stripPng) {
+  const imageDataUrl = `data:image/png;base64,${imagePng.toString('base64')}`;
+  const stripDataUrl = `data:image/png;base64,${stripPng.toString('base64')}`;
+  const base64 = await page.evaluate(async ({ imageDataUrl, stripDataUrl }) => {
+    const loadImage = (source) => new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Unable to load PNG for composition'));
+      image.src = source;
+    });
+    const [image, strip] = await Promise.all([loadImage(imageDataUrl), loadImage(stripDataUrl)]);
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight + strip.naturalHeight;
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#000000';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0);
+    context.drawImage(strip, 0, image.naturalHeight);
+    return canvas.toDataURL('image/png').split(',')[1];
+  }, { imageDataUrl, stripDataUrl });
+  return Buffer.from(base64, 'base64');
 }
 
 async function screenshotWithLocationMarker(page, marker, clip, viewport) {
@@ -431,6 +592,9 @@ function formatCoordinate(value) {
 
 function copyAttemptToRecord(record, attempt) {
   record.requestedCameraAltitude = attempt.urlCamera?.alt ?? attempt.requestedCameraAltitude ?? null;
+  record.requestedZoomLevel = attempt.requestedZoomLevel ?? null;
+  record.finalZoomLevel = attempt.finalZoomLevel ?? null;
+  record.zoomFallbackStep = attempt.zoomFallbackStep;
   record.cameraAltitudeClamped = Number.isFinite(record.requestedCameraAltitude) && record.camera.alt > record.requestedCameraAltitude;
   record.selectedDate = attempt.selectedDate;
   record.finalCamera = attempt.finalCamera;
@@ -440,6 +604,7 @@ function copyAttemptToRecord(record, attempt) {
   record.outputBytes = attempt.outputBytes;
   record.analysis = attempt.analysis;
   record.marker = attempt.marker;
+  record.dateLabel = attempt.dateLabel;
   record.retried = attempt.retried;
   if (attempt.retryMs) record.retryMs = attempt.retryMs;
 }
