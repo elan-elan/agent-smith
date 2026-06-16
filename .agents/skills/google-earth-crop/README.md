@@ -4,7 +4,7 @@ Human-facing guide for prompting the `google-earth-crop` skill. Agent instructio
 
 This skill captures Google Earth Web crops for places or coordinates, including historical imagery at the newest timeline date before a cutoff date. It saves a marked PNG plus a compact JSON sidecar with address/location metadata, the selected timeline date used, cutoff date, output path, zoom level, Google Earth query URL, and the OCR-parsed visible image date when available.
 
-Default framing starts at zoom level 19 as a centered square neighborhood crop around the target, usually a few buildings rather than a city-scale map. If close historical imagery is blank or low-detail, the skill tries zoom 18, then 1000m with one same-range retry, then 1500m.
+Default framing starts at zoom level 19 as a centered square neighborhood crop around the target, usually a few buildings rather than a city-scale map. If close historical imagery is blank, low-detail, or center-blurry, the skill tries guarded before-cutoff historical refresh candidates, then zoom 18, then 1000m with one same-range retry, then 1500m. When a lower zoom-level fallback succeeds, the saved image is center-cropped and resized back to the original output size so it covers the same requested extent; one zoom level lower uses the center 60% of width and height before resizing, and two levels lower uses the center 36%. The blur detector scores the center 55% of the crop so the target area drives the decision.
 
 
 ![4x4 before/after Google Earth crop demo](../../../data/google_earth_crop_before_after_grid.gif)
@@ -70,7 +70,7 @@ For a fast source check without launching Google Earth, run `npm run check` from
 
 ## Troubleshooting
 
-- If a crop looks blurry or like a loading screen, ask the agent to retry with more render settle time.
+- If a crop looks blurry or like a loading screen, ask the agent to retry; the normal retry path can click older image, then newer image, then additional older images to refresh Google Earth's tiles while keeping the accepted timeline date before the cutoff.
 - If you need wider context, ask the agent to use a larger preferred camera altitude.
 - If a custom crop does not show the red dot or the dot is off-center, make sure the clip is centered on the viewport center or ask for the default square clip.
 - If a coordinate crop points to the wrong place, inspect `batch-summary.json` or `benchmark-summary.json` for `targetDelta`, camera, and validation metadata; per-image sidecars intentionally stay compact.

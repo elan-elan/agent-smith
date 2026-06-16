@@ -9,6 +9,7 @@ import {
   DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE,
   DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE,
   DEFAULT_MARKER_RADIUS,
+  DEFAULT_MIN_CENTER_SHARPNESS_SCORE,
   DEFAULT_MIN_DETAIL_SCORE,
   DEFAULT_PREFERRED_CAMERA_ALTITUDE,
   DEFAULT_RENDER_SETTLE_MS,
@@ -42,6 +43,7 @@ const zoomCameraRange = cameraRangeForZoomLevel(zoomLevel);
 const intermediateFallbackCameraAltitude = Number(cliOptionValue('intermediate-fallback-camera-altitude') ?? DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE);
 const largeFallbackCameraAltitude = Number(cliOptionValue('large-fallback-camera-altitude') ?? DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE);
 const minDetailScore = Number(cliOptionValue('min-detail-score') ?? (zoomLevel && zoomLevel >= DEFAULT_ZOOM_LEVEL ? 40 : DEFAULT_MIN_DETAIL_SCORE));
+const minCenterSharpnessScore = Number(cliOptionValue('min-center-sharpness-score') ?? DEFAULT_MIN_CENTER_SHARPNESS_SCORE);
 const preferredCameraAltitude = Number(explicitPreferredAltitude ?? zoomCameraRange ?? DEFAULT_PREFERRED_CAMERA_ALTITUDE);
 const markLocation = !cliFlag('no-marker');
 const markerRadius = Number(cliOptionValue('marker-radius') ?? DEFAULT_MARKER_RADIUS);
@@ -129,6 +131,7 @@ try {
       cutoffDate: row.queryDate,
       renderSettleMs,
       minDetailScore,
+      minCenterSharpnessScore,
       preferredCameraAltitude,
       zoomLevel,
       intermediateFallbackCameraAltitude,
@@ -197,6 +200,7 @@ const batchReport = {
   largeFallbackCameraAltitude,
   renderSettleMs,
   minDetailScore,
+  minCenterSharpnessScore,
   preferredCameraAltitude,
   markLocation,
   markerRadius,
@@ -497,6 +501,7 @@ Options:
   --crop-retries         Full crop retries after core fallbacks fail. Default: 1
   --missing-ocr-retries  Retry successful crops that did not parse an imagery date. Default: 1
   --missing-ocr-retry-mode  How missing-OCR retries reset state: fresh-context or same-page. Default: fresh-context
+  --min-center-sharpness-score  Center-crop blur rejection threshold. Default: ${DEFAULT_MIN_CENTER_SHARPNESS_SCORE}
   --dry-run              Print planned rows without opening Google Earth
   --headed               Show Chromium for debugging
 

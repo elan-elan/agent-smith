@@ -10,6 +10,7 @@ export const DEFAULT_CLIP = { x: 410, y: 210, width: 780, height: 780 };
 export const DEFAULT_CUTOFF_DATE = '2020-01-01';
 export const DEFAULT_RENDER_SETTLE_MS = 3500;
 export const DEFAULT_MIN_DETAIL_SCORE = 50;
+export const DEFAULT_MIN_CENTER_SHARPNESS_SCORE = 1000;
 export const DEFAULT_PREFERRED_CAMERA_ALTITUDE = 500;
 export const DEFAULT_ZOOM_LEVEL = 19;
 export const DEFAULT_ROOF_ZOOM_LEVEL = 21;
@@ -23,6 +24,9 @@ export const DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS = 1000;
 const LOWEST_STANDARD_ZOOM_FALLBACK_LEVEL = 18;
 const ULTRA_CLOSE_CAMERA_ALTITUDE = 100;
 const ROOF_ZOOM_LEVEL_RANGE_METERS = 75;
+const HISTORICAL_TILE_REFRESH_OLDER = { x: 300, y: 120 };
+const HISTORICAL_TILE_REFRESH_NEWER = { x: 420, y: 120 };
+const CENTER_SHARPNESS_CROP_RATIO = 0.55;
 let imageryDateOcrWorkerPromise = null;
 
 export function optionValue(name, args = process.argv) {
@@ -86,6 +90,7 @@ export async function cropGoogleEarth(page, options) {
     cutoffDate = DEFAULT_CUTOFF_DATE,
     renderSettleMs = DEFAULT_RENDER_SETTLE_MS,
     minDetailScore = DEFAULT_MIN_DETAIL_SCORE,
+    minCenterSharpnessScore = DEFAULT_MIN_CENTER_SHARPNESS_SCORE,
     preferredCameraAltitude = options.maxCameraAltitude ?? DEFAULT_PREFERRED_CAMERA_ALTITUDE,
     zoomLevel = null,
     intermediateFallbackCameraAltitude = DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE,
@@ -196,14 +201,15 @@ export async function cropGoogleEarth(page, options) {
         recordTransientUiDismissal(attempt, cleanShot.transientUi);
         attempt.screenshotMs = Date.now() - screenshotStart;
         attempt.screenshotBytes = screenshot.length;
-        attempt.analysis = analyzeShot(screenshot, minDetailScore);
+        attempt.analysis = analyzeShot(screenshot, minDetailScore, minCenterSharpnessScore);
         attempt.retried = false;
 
-        if (attempt.analysis.splash || attempt.analysis.blank || attempt.analysis.lowDetail) {
+        if (attempt.analysis.splash || attempt.analysis.blank || attempt.analysis.lowDetail || attempt.analysis.blurred) {
           attempt.preRetryAnalysis = attempt.analysis;
           attempt.preRetryScreenshotBytes = screenshot.length;
           const skipRetryForWideRecovery = record.searchStrategy === 'direct-coordinate-url'
             && candidate.fallbackStep !== 'intermediate-fallback'
+            && candidate.fallbackStep !== 'requested-zoom'
             && altitudeIndex < altitudeCandidates.length - 1
             && (attempt.analysis.splash || attempt.analysis.blank || attempt.analysis.detailScore < minDetailScore * 0.2);
           attempt.responsePolicy = skipRetryForWideRecovery ? 'skip-retry-for-wide-recovery' : 'retry-same-altitude';
@@ -211,13 +217,47 @@ export async function cropGoogleEarth(page, options) {
             attempt.retried = false;
           } else {
             const retryStart = Date.now();
-            await page.waitForTimeout(3000);
-            const cleanRetryShot = await screenshotWithoutTransientUi(page, clip);
-            screenshot = cleanRetryShot.screenshot;
-            recordTransientUiDismissal(attempt, cleanRetryShot.transientUi);
+            let refreshedScreenshot = null;
+            let refreshedAnalysis = null;
+            let refreshedTransientUi = null;
+            if ((attempt.analysis.lowDetail || attempt.analysis.blurred) && !attempt.analysis.splash && !attempt.analysis.blank) {
+              const refreshResult = await refreshHistoricalTilesBeforeCutoff(page, selectedDate, targetDate, {
+                clip,
+                minDetailScore,
+                minCenterSharpnessScore,
+                currentAnalysis: attempt.analysis
+              }).catch((error) => ({
+                status: 'error',
+                error: String(error.message || error).slice(0, 300)
+              }));
+              const { screenshot: refreshScreenshot, analysis: refreshAnalysis, transientUi: refreshTransientUi, ...refreshMetadata } = refreshResult;
+              attempt.historicalTileRefresh = refreshMetadata;
+              refreshedScreenshot = refreshScreenshot ?? null;
+              refreshedAnalysis = refreshAnalysis ?? null;
+              refreshedTransientUi = refreshTransientUi ?? null;
+            }
+            if (attempt.historicalTileRefresh?.requiresPageReset) {
+              attempt.responsePolicy = 'abort-after-failed-historical-refresh';
+              await resetAfterFailedHistoricalTileRefresh(page, { location, targetCamera });
+              throw new Error(`historical tile refresh rejected: ${attempt.historicalTileRefresh.reason || attempt.historicalTileRefresh.status}`);
+            }
+            if (attempt.historicalTileRefresh?.status === 'ok' && attempt.historicalTileRefresh.acceptedDate) {
+              attempt.selectedDate = attempt.historicalTileRefresh.acceptedDate;
+              attempt.finalCamera = cameraFromUrl(page.url());
+              attempt.finalZoomLevel = Math.abs((attempt.finalCamera?.range ?? Infinity) - altitude) < 1e-6 ? candidate.zoomLevel : null;
+            }
+            if (attempt.historicalTileRefresh?.status !== 'ok' || !refreshedScreenshot || !refreshedAnalysis) {
+              if (attempt.historicalTileRefresh?.status !== 'ok') await page.waitForTimeout(3000);
+              const cleanRetryShot = await screenshotWithoutTransientUi(page, clip);
+              refreshedScreenshot = cleanRetryShot.screenshot;
+              refreshedTransientUi = cleanRetryShot.transientUi;
+              refreshedAnalysis = analyzeShot(refreshedScreenshot, minDetailScore, minCenterSharpnessScore);
+            }
+            screenshot = refreshedScreenshot;
+            recordTransientUiDismissal(attempt, refreshedTransientUi);
             attempt.retryMs = Date.now() - retryStart;
             attempt.screenshotBytes = screenshot.length;
-            attempt.analysis = analyzeShot(screenshot, minDetailScore);
+            attempt.analysis = refreshedAnalysis;
             attempt.retried = true;
           }
         }
@@ -226,6 +266,7 @@ export async function cropGoogleEarth(page, options) {
         if (attempt.analysis.splash) throw new Error('final crop is Google Earth splash screen');
         if (attempt.analysis.blank) throw new Error('final crop is blank or flat color');
         if (attempt.analysis.lowDetail) throw new Error(`final crop is low detail: detailScore ${attempt.analysis.detailScore.toFixed(2)} < ${minDetailScore}`);
+        if (attempt.analysis.blurred) throw new Error(`final crop is center blurred: centerSharpnessScore ${attempt.analysis.centerSharpnessScore.toFixed(2)} < ${minCenterSharpnessScore}`);
 
         const marker = locationMarkerForClip(clip, viewport, { enabled: markLocation, radius: markerRadius });
         let output = screenshot;
@@ -312,6 +353,7 @@ export function buildSummary(results) {
   const ok = results.filter((result) => result.status === 'ok');
   const totalTimes = ok.map((result) => result.totalMs).sort((left, right) => left - right);
   const detailScores = results.map((result) => result.analysis?.detailScore).filter(Number.isFinite);
+  const centerSharpnessScores = results.map((result) => result.analysis?.centerSharpnessScore).filter(Number.isFinite);
   const strictCameraAltitudeResults = results.filter((result) => result.strictCameraAltitude);
   const strictCameraAltitudeOk = ok.filter((result) => result.strictCameraAltitude);
   const zoomLevelResults = results.filter((result) => Number.isFinite(result.zoomLevel));
@@ -329,7 +371,9 @@ export function buildSummary(results) {
     splashDetected: results.filter((result) => result.analysis?.splash).length,
     blankDetected: results.filter((result) => result.analysis?.blank).length,
     lowDetailDetected: results.filter((result) => result.analysis?.lowDetail).length,
+    blurredDetected: results.filter((result) => result.analysis?.blurred).length,
     minDetailScore: detailScores.length ? Math.min(...detailScores) : null,
+    minCenterSharpnessScore: centerSharpnessScores.length ? Math.min(...centerSharpnessScores) : null,
     markerVisible: results.filter((result) => result.marker?.visible).length,
     markerDrawn: results.filter((result) => result.marker?.drawn).length,
     markerCentered: results.filter((result) => result.marker?.centered).length,
@@ -348,7 +392,7 @@ export function buildSummary(results) {
 }
 
 export function isPassingSummary(summary) {
-  return summary.total > 0 && summary.ok === summary.total && summary.failed === 0 && summary.splashDetected === 0 && summary.blankDetected === 0 && summary.lowDetailDetected === 0;
+  return summary.total > 0 && summary.ok === summary.total && summary.failed === 0 && summary.splashDetected === 0 && summary.blankDetected === 0 && summary.lowDetailDetected === 0 && summary.blurredDetected === 0;
 }
 
 export function targetDateFor(iso) {
@@ -951,6 +995,141 @@ async function showHistoricalImageryUi(page) {
   await page.waitForTimeout(1500);
 }
 
+async function refreshHistoricalTilesBeforeCutoff(page, selectedDate, latestAllowedDate, {
+  clip = DEFAULT_CLIP,
+  minDetailScore = DEFAULT_MIN_DETAIL_SCORE,
+  minCenterSharpnessScore = DEFAULT_MIN_CENTER_SHARPNESS_SCORE,
+  currentAnalysis = null
+} = {}) {
+  const refresh = {
+    status: 'skipped',
+    strategy: 'center-sharpness-before-cutoff',
+    selectedDateBefore: selectedDateFromUrl(page.url()),
+    latestAllowedDate,
+    minCenterSharpnessScore,
+    currentCenterSharpnessScore: Number.isFinite(currentAnalysis?.centerSharpnessScore) ? currentAnalysis.centerSharpnessScore : null,
+    candidates: []
+  };
+  if (!selectedDate) return { ...refresh, reason: 'missing-selected-date' };
+  if (!latestAllowedDate) return { ...refresh, reason: 'missing-latest-allowed-date' };
+  if (refresh.selectedDateBefore !== selectedDate) return { ...refresh, reason: 'selected-date-before-mismatch' };
+
+  await page.mouse.click(45, 150).catch(() => {});
+  await page.waitForTimeout(300);
+  await page.mouse.click(1560, 200).catch(() => {});
+  await page.waitForTimeout(300);
+
+  refresh.selectedDateBeforeOlder = selectedDateFromUrl(page.url());
+  if (refresh.selectedDateBeforeOlder !== selectedDate) return { ...refresh, reason: 'selected-date-after-dismiss-mismatch' };
+
+  const steps = [
+    { step: 'older', point: HISTORICAL_TILE_REFRESH_OLDER, waitMs: 2500 },
+    { step: 'newer', point: HISTORICAL_TILE_REFRESH_NEWER, waitMs: 5000 },
+    { step: 'older-second', point: HISTORICAL_TILE_REFRESH_OLDER, waitMs: 5000 },
+    { step: 'older-third', point: HISTORICAL_TILE_REFRESH_OLDER, waitMs: 5000 }
+  ];
+
+  for (const step of steps) {
+    await page.mouse.click(step.point.x, step.point.y);
+    await page.waitForTimeout(step.waitMs);
+
+    const candidateDate = selectedDateFromUrl(page.url());
+    const candidate = {
+      step: step.step,
+      selectedDate: candidateDate,
+      beforeCutoff: isIsoDateOnOrBefore(candidateDate, latestAllowedDate),
+      selectedDateChanged: candidateDate !== selectedDate
+    };
+    refresh.candidates.push(candidate);
+    if (step.step.startsWith('older')) {
+      refresh.olderDates = refresh.olderDates ?? [];
+      refresh.olderDates.push(candidateDate);
+    }
+    if (step.step === 'older') refresh.olderDate = candidateDate;
+    refresh.selectedDateAfter = candidateDate;
+
+    if (!candidateDate) {
+      candidate.reason = 'selected-date-missing';
+      continue;
+    }
+    if (!candidate.beforeCutoff) {
+      candidate.reason = 'selected-date-after-cutoff';
+      continue;
+    }
+
+    const cleanShot = await screenshotWithoutTransientUi(page, clip);
+    const analysis = analyzeShot(cleanShot.screenshot, minDetailScore, minCenterSharpnessScore);
+    candidate.screenshotBytes = cleanShot.screenshot.length;
+    candidate.detailScore = analysis.detailScore;
+    candidate.centerSharpnessScore = analysis.centerSharpnessScore;
+    candidate.lowDetail = analysis.lowDetail;
+    candidate.blurred = analysis.blurred;
+    candidate.splash = analysis.splash;
+    candidate.blank = analysis.blank;
+    candidate.accepted = !analysis.splash && !analysis.blank && !analysis.lowDetail && !analysis.blurred;
+
+    if (candidate.accepted) {
+      refresh.status = 'ok';
+      refresh.acceptedStep = step.step;
+      refresh.acceptedDate = candidateDate;
+      refresh.selectedDateChanged = candidateDate !== selectedDate;
+      return {
+        ...refresh,
+        screenshot: cleanShot.screenshot,
+        analysis,
+        transientUi: cleanShot.transientUi
+      };
+    }
+  }
+
+  if (!refresh.candidates.length) return { ...refresh, reason: 'no-refresh-candidates' };
+  const bestCandidate = refresh.candidates
+    .filter((candidate) => candidate.beforeCutoff && Number.isFinite(candidate.centerSharpnessScore))
+    .sort((left, right) => right.centerSharpnessScore - left.centerSharpnessScore)[0];
+  if (bestCandidate) {
+    refresh.bestRejectedCandidate = {
+      step: bestCandidate.step,
+      selectedDate: bestCandidate.selectedDate,
+      detailScore: bestCandidate.detailScore,
+      centerSharpnessScore: bestCandidate.centerSharpnessScore,
+      lowDetail: bestCandidate.lowDetail,
+      blurred: bestCandidate.blurred,
+      splash: bestCandidate.splash,
+      blank: bestCandidate.blank
+    };
+  }
+
+  const finalDate = selectedDateFromUrl(page.url());
+  refresh.selectedDateAfter = finalDate;
+  if (finalDate !== selectedDate && !isIsoDateOnOrBefore(finalDate, latestAllowedDate)) {
+    refresh.status = 'date-after-cutoff';
+    refresh.reason = 'final-selected-date-after-cutoff';
+    refresh.requiresPageReset = true;
+    try {
+      await page.goto(withHistoricalDate(page.url(), selectedDate), { waitUntil: 'commit', timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(500);
+      refresh.restoredDate = selectedDateFromUrl(page.url());
+    } catch (error) {
+      refresh.restoreError = String(error.message || error).slice(0, 300);
+    }
+    return refresh;
+  }
+
+  refresh.reason = bestCandidate ? 'no-center-sharp-before-cutoff-candidate' : 'no-before-cutoff-candidate';
+  return refresh;
+}
+
+function isIsoDateOnOrBefore(dateText, latestAllowedDate) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateText ?? '')
+    && /^\d{4}-\d{2}-\d{2}$/.test(latestAllowedDate ?? '')
+    && dateText <= latestAllowedDate;
+}
+
+async function resetAfterFailedHistoricalTileRefresh(page, { location, targetCamera }) {
+  await page.goto(searchUrl(location), { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+  await waitForReady(page, { previousCamera: null, targetCamera });
+}
+
 async function overlayImageDateText(page, imagePng, text) {
   const imageDataUrl = `data:image/png;base64,${imagePng.toString('base64')}`;
   const overlay = {
@@ -1185,7 +1364,7 @@ function writeVarint(value) {
   return Buffer.from(bytes);
 }
 
-function analyzeShot(screenshot, minDetailScore) {
+function analyzeShot(screenshot, minDetailScore, minCenterSharpnessScore = DEFAULT_MIN_CENTER_SHARPNESS_SCORE) {
   const { width, height, data } = decodePngRgba(screenshot);
 
   const countRegion = (xStartRatio, xEndRatio, yStartRatio, yEndRatio, predicate) => {
@@ -1251,11 +1430,47 @@ function analyzeShot(screenshot, minDetailScore) {
     }
   }
 
+  const centerCropWidth = Math.max(1, Math.floor(width * CENTER_SHARPNESS_CROP_RATIO));
+  const centerCropHeight = Math.max(1, Math.floor(height * CENTER_SHARPNESS_CROP_RATIO));
+  const centerLeft = Math.max(2, Math.floor((width - centerCropWidth) / 2));
+  const centerTop = Math.max(2, Math.floor((height - centerCropHeight) / 2));
+  const centerRight = Math.min(width - 2, centerLeft + centerCropWidth);
+  const centerBottom = Math.min(height - 2, centerTop + centerCropHeight);
+  const brightnessAt = (xPosition, yPosition) => {
+    const offset = (yPosition * width + xPosition) * 4;
+    return (data[offset] + data[offset + 1] + data[offset + 2]) / 3;
+  };
+  let centerSharpnessCount = 0;
+  let centerLaplacianSum = 0;
+  let centerLaplacianSquareSum = 0;
+  let centerLaplacianAbsoluteSum = 0;
+  for (let yPosition = centerTop; yPosition < centerBottom; yPosition += 2) {
+    for (let xPosition = centerLeft; xPosition < centerRight; xPosition += 2) {
+      const laplacian = 4 * brightnessAt(xPosition, yPosition)
+        - brightnessAt(xPosition - 2, yPosition)
+        - brightnessAt(xPosition + 2, yPosition)
+        - brightnessAt(xPosition, yPosition - 2)
+        - brightnessAt(xPosition, yPosition + 2);
+      centerSharpnessCount += 1;
+      centerLaplacianSum += laplacian;
+      centerLaplacianSquareSum += laplacian * laplacian;
+      centerLaplacianAbsoluteSum += Math.abs(laplacian);
+    }
+  }
+
   const gradientMean = gradientSum / Math.max(detailCount, 1);
   const gradientVariance = gradientSquareSum / Math.max(detailCount, 1) - gradientMean * gradientMean;
   const strongEdgeRatio = strongEdges / Math.max(detailCount, 1);
   const veryStrongEdgeRatio = veryStrongEdges / Math.max(detailCount, 1);
   const detailScore = gradientMean * (1 + strongEdgeRatio * 10);
+  const centerSharpnessMean = centerLaplacianSum / Math.max(centerSharpnessCount, 1);
+  const centerSharpnessVariance = centerLaplacianSquareSum / Math.max(centerSharpnessCount, 1) - centerSharpnessMean * centerSharpnessMean;
+  const centerSharpnessScore = Math.max(centerSharpnessVariance, 0);
+  const centerSharpnessMeanAbsolute = centerLaplacianAbsoluteSum / Math.max(centerSharpnessCount, 1);
+  const splash = logoWhite > 0.03 && (spinnerBlue > 0.001 || darkLeft > 0.70);
+  const blank = flatGreen > 0.85 || brightnessStd < 5;
+  const lowDetail = detailScore < minDetailScore;
+  const blurred = !splash && !blank && centerSharpnessScore < minCenterSharpnessScore;
 
   return {
     width,
@@ -1270,9 +1485,20 @@ function analyzeShot(screenshot, minDetailScore) {
     strongEdgeRatio,
     veryStrongEdgeRatio,
     detailScore,
-    splash: logoWhite > 0.03 && (spinnerBlue > 0.001 || darkLeft > 0.70),
-    blank: flatGreen > 0.85 || brightnessStd < 5,
-    lowDetail: detailScore < minDetailScore
+    centerSharpnessCropRatio: CENTER_SHARPNESS_CROP_RATIO,
+    centerSharpnessRegion: {
+      x: centerLeft,
+      y: centerTop,
+      width: Math.max(0, centerRight - centerLeft),
+      height: Math.max(0, centerBottom - centerTop)
+    },
+    centerSharpnessSampleCount: centerSharpnessCount,
+    centerSharpnessScore,
+    centerSharpnessMeanAbsolute,
+    splash,
+    blank,
+    lowDetail,
+    blurred
   };
 }
 
