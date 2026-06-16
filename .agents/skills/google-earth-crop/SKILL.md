@@ -25,7 +25,7 @@ npx playwright install chromium
 Use the bundled scripts before reimplementing the Playwright flow:
 
 - One-off crop: `node scripts/crop_google_earth.mjs --location "LOCATION" --cutoff YYYY-MM-DD --output path/to/crop.png`
-- Batch crop template: `node scripts/crop_permits_batch.mjs --csv permit_sample.csv --output data/permits_sample_v2 --sample-size 30 --seed permit-sample-v2-20260615`. Use this as the starting point for spreadsheet/CSV batch requests instead of creating a fresh Playwright loop.
+- Batch crop template: `node scripts/crop_permits_batch.mjs --csv permits.csv --output data/permits_batch`. Use this as the starting point for spreadsheet/CSV batch requests instead of creating a fresh Playwright loop. By default it processes all eligible rows in input order; add `--limit N` only for smoke tests.
 - JSON report: written by default next to the PNG using the same basename and `.json` extension. Add `--summary path/to/report.json` to override or `--no-summary` to skip.
 - Zoom control: omit `--zoom-level` to use default zoom 19, or add `--zoom-level 21` for tighter roof-level crops. This patches both the Google Earth URL altitude (`a`) and camera range (`d`) fields; it is true source zoom, not a post-capture crop. When a zoom crop fails validation, the scripts try lower zoom levels down to zoom 18, then `--intermediate-fallback-camera-altitude` (`1000m` default) with one same-range retry, then `--large-fallback-camera-altitude` (`1500m` default).
 - Custom clip: add `--clip x,y,width,height`. Default is a `780x780` square centered on the query/camera point.
@@ -39,17 +39,17 @@ For normal crop requests, run or adapt `scripts/crop_google_earth.mjs`. For batc
 
 ## Batch Crop Template
 
-Use `scripts/crop_permits_batch.mjs` as the reusable example for future bulk requests. The current script was built for `permit_sample.csv` with `lon`, `lat`, `addr_tract_key`, and `permit_effective_date`, then samples unique path-safe address keys and creates `before`/`after` crops with cutoffs at permit date minus/plus one year. It saves final names like `{addr_tract_key}_{before|after}_{YYYY-MM-DD}.png`, where the date is the parsed visible OCR imagery date when plausible, otherwise the query cutoff date.
+Use `scripts/crop_permits_batch.mjs` as the reusable example for future bulk requests. The current script expects a CSV with `lon`, `lat`, `addr_tract_key`, and `permit_effective_date`, then processes eligible rows in input order and creates `before`/`after` crops with cutoffs at permit date minus/plus one year. It saves final names like `{addr_tract_key}_{before|after}_{YYYY-MM-DD}.png`, where the date is the parsed visible OCR imagery date when plausible, otherwise the query cutoff date. If duplicate address keys would collide, the script appends the source line to the output filename key.
 
 When a future batch input differs, adapt the data-mapping functions near the bottom of the script rather than rewriting the crop engine:
 
 - `parsePermitRows`: change CSV/header parsing and validation. For raw or uncleaned addresses, set `row.location` to the full address/place query that Google Earth should search; for coordinates, keep `row.location` as `lat,lon`. Preserve original source fields in the row object so the sidecar can record them.
 - `cropPhases`: change date parsing and cutoff derivation. Normalize all derived cutoffs to `YYYY-MM-DD` before calling `cropGoogleEarth`. This is the right place for custom windows, event dates, before/after offsets, or already-provided cutoff columns.
 - `baseLabel` construction and `filenameDateFor`: change output naming. Sanitize raw addresses for filenames, but do not over-clean the search query passed as `location`.
-- `sampledRowForSummary` and `compactCropManifest`: update batch summaries and sidecars for the user's source columns and date rules.
+- `rowForSummary` and `compactCropManifest`: update batch summaries and sidecars for the user's source columns and date rules.
 - Keep `cropWithRetries`, browser/page reuse, marker/date-label options, and `cropGoogleEarth` calls unless there is a specific reason to change behavior.
 
-Before running a long batch, use `--dry-run` to inspect selected rows and derived cutoffs. For batch requests where every row must be processed, set `--sample-size` to the desired row count or adapt `selectSample` to preserve input order instead of random sampling.
+Before running a long batch, use `--dry-run` to inspect eligible rows and derived cutoffs. Use `--limit N` only for a small input-order smoke test; for actual batch requests, filter the CSV upstream when the user wants a subset.
 
 When asked to run the eval/benchmark, run it automatically:
 
@@ -57,7 +57,7 @@ When asked to run the eval/benchmark, run it automatically:
 node scripts/benchmark_google_earth_crop.mjs --output benchmark-runs/us-10-coordinate
 ```
 
-Shortcuts: `npm run install:playwright`, `npm run crop -- --location "LOCATION" --output crop.png`, `npm run crop:permits-batch -- --csv permit_sample.csv --output data/permits_sample_v2`, `npm run eval`, `npm run eval:full`, `npm run check`.
+Shortcuts: `npm run install:playwright`, `npm run crop -- --location "LOCATION" --output crop.png`, `npm run crop:permits-batch -- --csv permits.csv --output data/permits_batch`, `npm run eval`, `npm run eval:full`, `npm run check`.
 
 ## Fast Path
 

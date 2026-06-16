@@ -26,10 +26,9 @@ import {
   terminateImageryDateOcrWorker
 } from './google_earth_crop_core.mjs';
 
-const csvPath = path.resolve(optionValue('csv') ?? 'permit_sample.csv');
-const outputDir = path.resolve(optionValue('output') ?? 'data/permits_sample_v2');
-const sampleSize = Number(optionValue('sample-size') ?? optionValue('limit') ?? 30);
-const seed = optionValue('seed') ?? String(Date.now());
+const csvOption = optionValue('csv');
+const outputOption = optionValue('output');
+const rowLimitOption = optionValue('limit');
 const cropRetries = Number(optionValue('crop-retries') ?? 1);
 const missingOcrRetries = Number(optionValue('missing-ocr-retries') ?? 1);
 const renderSettleMs = Number(optionValue('render-settle-ms') ?? DEFAULT_RENDER_SETTLE_MS);
@@ -54,15 +53,21 @@ if (optionFlag('help')) {
   process.exit(0);
 }
 
-if (!Number.isFinite(sampleSize) || sampleSize <= 0) throw new Error('--sample-size must be a positive number');
+if (csvOption == null) throw new Error('--csv is required');
+if (outputOption == null) throw new Error('--output is required');
+if (optionValue('sample-size') != null) throw new Error('--sample-size was removed; filter the CSV before running or use --limit to process a prefix for a smoke test');
+if (optionValue('seed') != null) throw new Error('--seed was removed; rows are processed in input order');
 if (!Number.isFinite(cropRetries) || cropRetries < 0) throw new Error('--crop-retries must be zero or greater');
 if (!Number.isFinite(missingOcrRetries) || missingOcrRetries < 0) throw new Error('--missing-ocr-retries must be zero or greater');
 
+const csvPath = path.resolve(csvOption);
+const outputDir = path.resolve(outputOption);
+const rowLimit = parseOptionalPositiveInteger(rowLimitOption, '--limit');
 const csvText = await fs.readFile(csvPath, 'utf8');
 const parsedRows = parsePermitRows(csvText);
 const eligibleRows = parsedRows.filter((row) => row.valid && isPathSafeKey(row.addrTractKey));
 const skippedRows = parsedRows.filter((row) => !row.valid || !isPathSafeKey(row.addrTractKey));
-const sampledRows = selectSample(eligibleRows, sampleSize, seededRandom(seed));
+const rowsToProcess = selectRows(eligibleRows, rowLimit);
 
 await fs.mkdir(outputDir, { recursive: true });
 
@@ -70,12 +75,12 @@ if (optionFlag('dry-run')) {
   console.log(JSON.stringify({
     csvPath,
     outputDir,
-    seed,
-    requestedSampleSize: sampleSize,
+    rowLimit,
     parsedRows: parsedRows.length,
     eligibleRows: eligibleRows.length,
     skippedRows: skippedRows.length,
-    sampledRows: sampledRows.map(sampledRowForSummary)
+    rowsToProcess: rowsToProcess.length,
+    rows: rowsToProcess.map(rowForSummary)
   }, null, 2));
   process.exit(0);
 }
@@ -91,16 +96,16 @@ const perLocation = [];
 let lastConfirmedCamera = null;
 
 try {
-  for (const [sampleIndex, row] of sampledRows.entries()) {
+  for (const [rowIndex, row] of rowsToProcess.entries()) {
     const phases = cropPhases(row.permitEffectiveDate);
     const locationResult = {
-      sampleIndex: sampleIndex + 1,
-      row: sampledRowForSummary(row),
+      rowIndex: rowIndex + 1,
+      row: rowForSummary(row),
       crops: []
     };
 
     for (const phase of phases) {
-      const baseLabel = `${row.addrTractKey}_${phase.name}`;
+      const baseLabel = `${row.outputKey}_${phase.name}`;
       const temporaryOutputPath = path.join(outputDir, `.tmp-${process.pid}-${perCrop.length + 1}-${baseLabel}.png`);
       const result = await cropWithRetries(page, {
         location: row.location,
@@ -145,7 +150,7 @@ try {
       });
       await fs.writeFile(jsonPath, `${JSON.stringify(manifest, null, 2)}\n`);
       locationResult.crops.push({ phase: phase.name, outputPath: finalOutputPath, jsonPath, status: result.status });
-      console.log(`${result.status.toUpperCase()} ${perCrop.length}/${sampledRows.length * 2} ${path.basename(finalOutputPath)} cutoff=${phase.cutoffDate} selected=${result.selectedDate ?? 'none'} ${result.totalMs}ms`);
+      console.log(`${result.status.toUpperCase()} ${perCrop.length}/${rowsToProcess.length * 2} ${path.basename(finalOutputPath)} cutoff=${phase.cutoffDate} selected=${result.selectedDate ?? 'none'} ${result.totalMs}ms`);
     }
 
     perLocation.push(locationResult);
@@ -160,11 +165,11 @@ const batchReport = {
   date: new Date().toISOString(),
   csvPath,
   outputDir,
-  seed,
-  requestedSampleSize: sampleSize,
+  rowLimit,
   parsedRows: parsedRows.length,
   eligibleRows: eligibleRows.length,
   skippedRows: skippedRows.length,
+  rowsToProcess: rowsToProcess.length,
   uniquePathSafeAddrTractKeys: new Set(eligibleRows.map((row) => row.addrTractKey)).size,
   zoomLevel,
   zoomCameraRange,
@@ -183,14 +188,14 @@ const batchReport = {
   viewport,
   clip,
   results: summary,
-  sampledRows: sampledRows.map(sampledRowForSummary),
+  rows: rowsToProcess.map(rowForSummary),
   perLocation,
   perCrop
 };
 
 await fs.writeFile(path.join(outputDir, 'batch-summary.json'), `${JSON.stringify(batchReport, null, 2)}\n`);
 console.log(JSON.stringify(summary, null, 2));
-process.exit(summary.failed === 0 && summary.total === sampledRows.length * 2 ? 0 : 1);
+process.exit(summary.failed === 0 && summary.total === rowsToProcess.length * 2 ? 0 : 1);
 
 async function cropWithRetries(page, cropOptions, { cropRetries: retries, missingOcrRetries: ocrRetries }) {
   let finalResult = null;
@@ -386,51 +391,27 @@ function isPathSafeKey(addrTractKey) {
   return Boolean(addrTractKey) && !addrTractKey.includes('/') && !addrTractKey.includes('\0');
 }
 
-function selectSample(rows, requestedSampleSize, random) {
-  const shuffledRows = shuffle([...rows], random);
-  const selectedRows = [];
-  const selectedKeys = new Set();
-  for (const row of shuffledRows) {
-    if (selectedKeys.has(row.addrTractKey)) continue;
-    selectedRows.push(row);
-    selectedKeys.add(row.addrTractKey);
-    if (selectedRows.length === requestedSampleSize) break;
-  }
-  if (selectedRows.length < requestedSampleSize) {
-    throw new Error(`Only ${selectedRows.length} unique path-safe eligible rows available for requested sample size ${requestedSampleSize}`);
-  }
-  return selectedRows;
+function selectRows(rows, rowLimit) {
+  const selectedRows = rowLimit === null ? [...rows] : rows.slice(0, rowLimit);
+  if (selectedRows.length === 0) throw new Error('No eligible path-safe rows to crop');
+
+  const keyCounts = new Map();
+  for (const row of selectedRows) keyCounts.set(row.addrTractKey, (keyCounts.get(row.addrTractKey) ?? 0) + 1);
+
+  return selectedRows.map((row) => ({
+    ...row,
+    outputKey: keyCounts.get(row.addrTractKey) > 1 ? `${row.addrTractKey}_line-${row.sourceLine}` : row.addrTractKey
+  }));
 }
 
-function shuffle(values, random) {
-  for (let currentIndex = values.length - 1; currentIndex > 0; currentIndex -= 1) {
-    const swapIndex = Math.floor(random() * (currentIndex + 1));
-    [values[currentIndex], values[swapIndex]] = [values[swapIndex], values[currentIndex]];
-  }
-  return values;
+function parseOptionalPositiveInteger(value, optionName) {
+  if (value == null) return null;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number <= 0) throw new Error(`${optionName} must be a positive integer`);
+  return number;
 }
 
-function seededRandom(seedText) {
-  let state = hashString(seedText);
-  return () => {
-    state |= 0;
-    state = state + 0x6d2b79f5 | 0;
-    let output = Math.imul(state ^ state >>> 15, 1 | state);
-    output = output + Math.imul(output ^ output >>> 7, 61 | output) ^ output;
-    return ((output ^ output >>> 14) >>> 0) / 4294967296;
-  };
-}
-
-function hashString(text) {
-  let hash = 2166136261;
-  for (let characterIndex = 0; characterIndex < text.length; characterIndex += 1) {
-    hash ^= text.charCodeAt(characterIndex);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-function sampledRowForSummary(row) {
+function rowForSummary(row) {
   return {
     sourceLine: row.sourceLine,
     lon: row.lon,
@@ -438,6 +419,7 @@ function sampledRowForSummary(row) {
     address: row.address,
     location: row.location,
     addrTractKey: row.addrTractKey,
+    outputKey: row.outputKey,
     permitEffectiveDate: formatIsoDate(row.permitEffectiveDate),
     beforeCutoffDate: formatIsoDate(addYears(row.permitEffectiveDate, -1)),
     afterCutoffDate: formatIsoDate(addYears(row.permitEffectiveDate, 1))
@@ -451,15 +433,14 @@ function defaultSummaryPath(imagePath) {
 }
 
 function printUsage() {
-  console.error(`Usage: node .agents/skills/google-earth-crop/scripts/crop_permits_batch.mjs --csv permit_sample.csv --output data/permits_sample_v2 --sample-size 30
+  console.error(`Usage: node .agents/skills/google-earth-crop/scripts/crop_permits_batch.mjs --csv permits.csv --output data/permits_batch
 
 Options:
-  --csv                  Input permit CSV. Default: permit_sample.csv
-  --output               Output directory. Default: data/permits_sample_v2
-  --sample-size, --limit Number of random unique addr_tract_key rows. Default: 30
-  --seed                 Seed for reproducible sampling. Default: current timestamp
+  --csv                  Required input permit CSV
+  --output               Required output directory
+  --limit                Optional positive row prefix limit for smoke tests. Default: process all eligible rows in input order
   --crop-retries         Full crop retries after core fallbacks fail. Default: 1
-  --dry-run              Print sampled rows without opening Google Earth
+  --dry-run              Print rows and derived cutoffs without opening Google Earth
   --headed               Show Chromium for debugging
 `);
 }

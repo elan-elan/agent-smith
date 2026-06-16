@@ -30,8 +30,8 @@
     },
     {
       "id": 2,
-      "prompt": "Use the google-earth-crop skill for a tiny permit CSV batch smoke test. Create a temporary one-row CSV with lon, lat, addr_tract_key, address, and permit_effective_date columns, then run scripts/crop_permits_batch.mjs with --sample-size 1 and an output directory under /tmp. Report the before/after PNG paths, JSON sidecar paths, the date used in each filename, and whether imageDateOcr was parsed or fell back to the cutoff date.",
-      "expected_output": "A batch smoke run that uses scripts/crop_permits_batch.mjs instead of writing a fresh Playwright loop. It should create one before crop and one after crop, each with a PNG and adjacent compact JSON sidecar. Filenames should use the addr_tract_key, phase, and OCR imagery date when plausible, otherwise the phase cutoff date. The saved crop should not include an appended bottom strip; it may include a top-left image-date overlay only when OCR parses the visible Google Earth status-bar date. batch-summary.json may retain detailed diagnostics, but each per-image JSON sidecar stays flat and minimal.",
+      "prompt": "Use the google-earth-crop skill for a tiny permit CSV batch smoke test. Create a temporary one-row CSV with lon, lat, addr_tract_key, address, and permit_effective_date columns, then run scripts/crop_permits_batch.mjs with that CSV and an output directory under /tmp. Report the before/after PNG paths, JSON sidecar paths, the date used in each filename, and whether imageDateOcr was parsed or fell back to the cutoff date.",
+      "expected_output": "A batch smoke run that uses scripts/crop_permits_batch.mjs instead of writing a fresh Playwright loop. It should process the eligible CSV rows in input order and create one before crop and one after crop for the one-row smoke CSV, each with a PNG and adjacent compact JSON sidecar. Filenames should use the addr_tract_key, phase, and OCR imagery date when plausible, otherwise the phase cutoff date. The saved crop should not include an appended bottom strip; it may include a top-left image-date overlay only when OCR parses the visible Google Earth status-bar date. batch-summary.json may retain detailed diagnostics, but each per-image JSON sidecar stays flat and minimal.",
       "files": [
         "SKILL.md",
         "scripts/google_earth_crop_core.mjs",
@@ -40,7 +40,7 @@
       "expectations": [
         "The agent uses or adapts scripts/crop_permits_batch.mjs for the CSV batch instead of creating a separate browser loop.",
         "The input CSV requires lon, lat, addr_tract_key, and permit_effective_date, and may use address when present.",
-        "The run creates both before and after crops for the sampled permit row using cutoff dates one year before and one year after permit_effective_date.",
+        "The run creates both before and after crops for each eligible permit row using cutoff dates one year before and one year after permit_effective_date.",
         "Each PNG is saved without appending the OCR strip to the image.",
         "Each PNG includes a top-left image-date overlay only when the Google Earth bottom status-bar OCR returns a plausible imagery date.",
         "Each per-image JSON sidecar contains only address, addressKey, dateUsed, cutoffDate, location, outputPath, zoomLevel, googleEarthQueryUrl, and imageDateOcr, plus error only for failed crops.",
