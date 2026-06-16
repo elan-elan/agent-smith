@@ -9,6 +9,7 @@ import {
   DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE,
   DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE,
   DEFAULT_MARKER_RADIUS,
+  DEFAULT_MIN_CENTER_SHARPNESS_SCORE,
   DEFAULT_MIN_DETAIL_SCORE,
   DEFAULT_PREFERRED_CAMERA_ALTITUDE,
   DEFAULT_RENDER_SETTLE_MS,
@@ -42,6 +43,7 @@ const zoomCameraRange = cameraRangeForZoomLevel(zoomLevel);
 const intermediateFallbackCameraAltitude = Number(cliOptionValue('intermediate-fallback-camera-altitude') ?? DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE);
 const largeFallbackCameraAltitude = Number(cliOptionValue('large-fallback-camera-altitude') ?? DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE);
 const minDetailScore = Number(cliOptionValue('min-detail-score') ?? (zoomLevel && zoomLevel >= DEFAULT_ZOOM_LEVEL ? 40 : DEFAULT_MIN_DETAIL_SCORE));
+const minCenterSharpnessScore = Number(cliOptionValue('min-center-sharpness-score') ?? DEFAULT_MIN_CENTER_SHARPNESS_SCORE);
 const preferredCameraAltitude = Number(explicitPreferredAltitude ?? zoomCameraRange ?? DEFAULT_PREFERRED_CAMERA_ALTITUDE);
 const markLocation = !cliFlag('no-marker');
 const markerRadius = Number(cliOptionValue('marker-radius') ?? DEFAULT_MARKER_RADIUS);
@@ -49,6 +51,7 @@ const includeDateLabel = !cliFlag('no-date-label');
 const extractImageryDate = includeDateLabel && !cliFlag('no-date-ocr') && DEFAULT_EXTRACT_IMAGERY_DATE;
 const imageryDateOcrRetries = Number(cliOptionValue('date-ocr-retries') ?? DEFAULT_IMAGERY_DATE_OCR_RETRIES);
 const imageryDateOcrRetryWaitMs = Number(cliOptionValue('date-ocr-retry-wait-ms') ?? DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS);
+const matchRequestedZoomExtent = cliFlag('match-requested-zoom-extent');
 const viewport = DEFAULT_VIEWPORT;
 const clip = parseClip(cliOptionValue('clip'));
 
@@ -87,6 +90,7 @@ if (cliFlag('dry-run')) {
     requiredColumns: COMMON_REQUIRED_COLUMNS,
     locationColumnSets: [COORDINATE_LOCATION_COLUMNS, ['address']],
     rowLimit,
+    matchRequestedZoomExtent,
     parsedRows: rawRows.length,
     rowsToProcess: plannedRows.length,
     plannedCropCount,
@@ -129,6 +133,7 @@ try {
       cutoffDate: row.queryDate,
       renderSettleMs,
       minDetailScore,
+      minCenterSharpnessScore,
       preferredCameraAltitude,
       zoomLevel,
       intermediateFallbackCameraAltitude,
@@ -139,6 +144,7 @@ try {
       extractImageryDate,
       imageryDateOcrRetries,
       imageryDateOcrRetryWaitMs,
+      matchRequestedZoomExtent,
       clip,
       previousCamera: previousCameraForReadiness,
       index: rowIndex + 1,
@@ -197,6 +203,7 @@ const batchReport = {
   largeFallbackCameraAltitude,
   renderSettleMs,
   minDetailScore,
+  minCenterSharpnessScore,
   preferredCameraAltitude,
   markLocation,
   markerRadius,
@@ -205,6 +212,7 @@ const batchReport = {
   missingOcrRetryMode,
   imageryDateOcrRetries,
   imageryDateOcrRetryWaitMs,
+  matchRequestedZoomExtent,
   viewport,
   clip,
   results: summary,
@@ -497,6 +505,8 @@ Options:
   --crop-retries         Full crop retries after core fallbacks fail. Default: 1
   --missing-ocr-retries  Retry successful crops that did not parse an imagery date. Default: 1
   --missing-ocr-retry-mode  How missing-OCR retries reset state: fresh-context or same-page. Default: fresh-context
+  --min-center-sharpness-score  Center-crop blur rejection threshold. Default: ${DEFAULT_MIN_CENTER_SHARPNESS_SCORE}
+  --match-requested-zoom-extent  If a lower zoom-level fallback succeeds, center-crop it to match the requested zoom extent and resize back before overlays.
   --dry-run              Print planned rows without opening Google Earth
   --headed               Show Chromium for debugging
 

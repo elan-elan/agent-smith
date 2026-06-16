@@ -12,6 +12,7 @@ import {
   DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE,
   DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE,
   DEFAULT_MARKER_RADIUS,
+  DEFAULT_MIN_CENTER_SHARPNESS_SCORE,
   DEFAULT_MIN_DETAIL_SCORE,
   DEFAULT_PREFERRED_CAMERA_ALTITUDE,
   DEFAULT_ROOF_ZOOM_LEVEL,
@@ -43,6 +44,7 @@ const zoomCameraRange = cameraRangeForZoomLevel(zoomLevel);
 const intermediateFallbackCameraAltitude = Number(optionValue('intermediate-fallback-camera-altitude') ?? DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE);
 const largeFallbackCameraAltitude = Number(optionValue('large-fallback-camera-altitude') ?? DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE);
 const minDetailScore = Number(optionValue('min-detail-score') ?? (zoomLevel && zoomLevel >= DEFAULT_ZOOM_LEVEL ? 40 : DEFAULT_MIN_DETAIL_SCORE));
+const minCenterSharpnessScore = Number(optionValue('min-center-sharpness-score') ?? DEFAULT_MIN_CENTER_SHARPNESS_SCORE);
 const preferredCameraAltitude = Number(explicitPreferredAltitude ?? zoomCameraRange ?? DEFAULT_PREFERRED_CAMERA_ALTITUDE);
 const markLocation = !optionFlag('no-marker');
 const markerRadius = Number(optionValue('marker-radius') ?? DEFAULT_MARKER_RADIUS);
@@ -50,6 +52,7 @@ const includeDateLabel = !optionFlag('no-date-label');
 const extractImageryDate = includeDateLabel && !optionFlag('no-date-ocr') && DEFAULT_EXTRACT_IMAGERY_DATE;
 const imageryDateOcrRetries = Number(optionValue('date-ocr-retries') ?? DEFAULT_IMAGERY_DATE_OCR_RETRIES);
 const imageryDateOcrRetryWaitMs = Number(optionValue('date-ocr-retry-wait-ms') ?? DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS);
+const matchRequestedZoomExtent = optionFlag('match-requested-zoom-extent');
 const clip = parseClip(optionValue('clip'));
 
 if (!location || optionFlag('help')) {
@@ -72,6 +75,7 @@ try {
     cutoffDate,
     renderSettleMs,
     minDetailScore,
+    minCenterSharpnessScore,
     preferredCameraAltitude,
     zoomLevel,
     intermediateFallbackCameraAltitude,
@@ -82,6 +86,7 @@ try {
     extractImageryDate,
     imageryDateOcrRetries,
     imageryDateOcrRetryWaitMs,
+    matchRequestedZoomExtent,
     clip
   });
 
@@ -96,6 +101,7 @@ try {
     largeFallbackCameraAltitude,
     renderSettleMs,
     minDetailScore,
+    minCenterSharpnessScore,
     preferredCameraAltitude,
     markLocation,
     markerRadius,
@@ -103,6 +109,7 @@ try {
     extractImageryDate,
     imageryDateOcrRetries,
     imageryDateOcrRetryWaitMs,
+    matchRequestedZoomExtent,
     viewport: DEFAULT_VIEWPORT,
     clip,
     result
@@ -140,7 +147,7 @@ function compactCropManifest(cropReport, jsonPath) {
 
 function positionalLocation() {
   const args = process.argv.slice(2);
-  const optionsWithValues = new Set(['--location', '--loc', '--cutoff', '--output', '--out', '--summary', '--clip', '--zoom-level', '--intermediate-fallback-camera-altitude', '--large-fallback-camera-altitude', '--render-settle-ms', '--min-detail-score', '--preferred-camera-altitude', '--max-camera-altitude', '--marker-radius', '--date-ocr-retries', '--date-ocr-retry-wait-ms']);
+  const optionsWithValues = new Set(['--location', '--loc', '--cutoff', '--output', '--out', '--summary', '--clip', '--zoom-level', '--intermediate-fallback-camera-altitude', '--large-fallback-camera-altitude', '--render-settle-ms', '--min-detail-score', '--min-center-sharpness-score', '--preferred-camera-altitude', '--max-camera-altitude', '--marker-radius', '--date-ocr-retries', '--date-ocr-retry-wait-ms']);
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (optionsWithValues.has(arg)) {
@@ -173,6 +180,7 @@ Options:
   --large-fallback-camera-altitude  Final recovery range in meters after zoom fallbacks fail. Default: ${DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE}
   --render-settle-ms     Wait after date validation. Default: ${DEFAULT_RENDER_SETTLE_MS}
   --min-detail-score     Low-detail rejection threshold. Default: ${DEFAULT_MIN_DETAIL_SCORE}
+  --min-center-sharpness-score  Center-crop blur rejection threshold. Default: ${DEFAULT_MIN_CENTER_SHARPNESS_SCORE}
   --preferred-camera-altitude  Preferred close camera altitude in meters; falls back wider if needed. Default: ${DEFAULT_PREFERRED_CAMERA_ALTITUDE}
   --max-camera-altitude        Legacy alias for --preferred-camera-altitude.
   --marker-radius        Red location marker radius in pixels. Default: ${DEFAULT_MARKER_RADIUS}
@@ -181,6 +189,7 @@ Options:
   --no-date-ocr          Append the date/status strip but skip OCR, which also disables the image-date text overlay. Default: ${DEFAULT_EXTRACT_IMAGERY_DATE ? 'OCR strip' : 'skip OCR'}.
   --date-ocr-retries     Retry bottom-strip screenshot+OCR when no date is parsed. Default: ${DEFAULT_IMAGERY_DATE_OCR_RETRIES}
   --date-ocr-retry-wait-ms  Wait between OCR retry screenshots. Default: ${DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS}
+  --match-requested-zoom-extent  If a lower zoom-level fallback succeeds, center-crop it to match the requested zoom extent and resize back before overlays.
   --headed               Show Chromium for debugging.
 `);
 }

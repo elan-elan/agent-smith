@@ -11,7 +11,7 @@ Purpose: verify that the `google-earth-crop` skill is fast without accepting sta
 - zoom level: start at default `19`, mapping to camera altitude/range `300m`; if validation fails, try zoom 18 (`600m`), intermediate recovery (`1000m`) with one same-range retry, then large recovery (`1500m`)
 - render settle: `3500ms` after selected-date validation
 - minimum detail score: `50`
-- red location marker: enabled by default, radius `7px`
+- red location marker: enabled by default, radius `4px`
 - visible Google Earth date/status label: enabled by default by appending the bottom status-bar strip below each crop, OCRing that strip, and overlaying the parsed image date at the top left when OCR succeeds
 
 ## Fixed Random US Coordinates

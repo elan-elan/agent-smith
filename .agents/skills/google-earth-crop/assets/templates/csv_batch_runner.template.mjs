@@ -19,6 +19,7 @@ const {
   DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE,
   DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE,
   DEFAULT_MARKER_RADIUS,
+  DEFAULT_MIN_CENTER_SHARPNESS_SCORE,
   DEFAULT_MIN_DETAIL_SCORE,
   DEFAULT_RENDER_SETTLE_MS,
   DEFAULT_VIEWPORT,
@@ -48,6 +49,7 @@ const zoomCameraRange = cameraRangeForZoomLevel(zoomLevel);
 const intermediateFallbackCameraAltitude = Number(cliOptionValue('intermediate-fallback-camera-altitude') ?? DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE);
 const largeFallbackCameraAltitude = Number(cliOptionValue('large-fallback-camera-altitude') ?? DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE);
 const minDetailScore = Number(cliOptionValue('min-detail-score') ?? (zoomLevel && zoomLevel >= DEFAULT_ZOOM_LEVEL ? 40 : DEFAULT_MIN_DETAIL_SCORE));
+const minCenterSharpnessScore = Number(cliOptionValue('min-center-sharpness-score') ?? DEFAULT_MIN_CENTER_SHARPNESS_SCORE);
 const preferredCameraAltitude = Number(explicitPreferredAltitude ?? zoomCameraRange ?? 500);
 const markLocation = !cliFlag('no-marker');
 const markerRadius = Number(cliOptionValue('marker-radius') ?? DEFAULT_MARKER_RADIUS);
@@ -55,6 +57,7 @@ const includeDateLabel = !cliFlag('no-date-label');
 const extractImageryDate = includeDateLabel && !cliFlag('no-date-ocr') && DEFAULT_EXTRACT_IMAGERY_DATE;
 const imageryDateOcrRetries = Number(cliOptionValue('date-ocr-retries') ?? DEFAULT_IMAGERY_DATE_OCR_RETRIES);
 const imageryDateOcrRetryWaitMs = Number(cliOptionValue('date-ocr-retry-wait-ms') ?? DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS);
+const matchRequestedZoomExtent = cliFlag('match-requested-zoom-extent');
 const viewport = DEFAULT_VIEWPORT;
 const clip = parseClip(cliOptionValue('clip'));
 
@@ -127,6 +130,7 @@ try {
         cutoffDate: cropRequest.cutoffDate,
         renderSettleMs,
         minDetailScore,
+        minCenterSharpnessScore,
         preferredCameraAltitude,
         zoomLevel,
         intermediateFallbackCameraAltitude,
@@ -137,6 +141,7 @@ try {
         extractImageryDate,
         imageryDateOcrRetries,
         imageryDateOcrRetryWaitMs,
+        matchRequestedZoomExtent,
         clip,
         previousCamera: lastConfirmedCamera,
         index: perCrop.length + 1,
@@ -186,6 +191,7 @@ const batchReport = {
   largeFallbackCameraAltitude,
   renderSettleMs,
   minDetailScore,
+  minCenterSharpnessScore,
   preferredCameraAltitude,
   markLocation,
   markerRadius,
@@ -193,6 +199,7 @@ const batchReport = {
   extractImageryDate,
   imageryDateOcrRetries,
   imageryDateOcrRetryWaitMs,
+  matchRequestedZoomExtent,
   viewport,
   clip,
   results: summary,
