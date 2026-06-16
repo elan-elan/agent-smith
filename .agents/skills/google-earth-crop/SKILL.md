@@ -51,9 +51,20 @@ Keep `assets/templates/csv_batch_runner.template.mjs` only as an escape hatch fo
 
 For normalization examples, multiple-date rules, and the stable lower-level pieces to preserve, read `references/csv-batch-template.md`.
 
-Before running a long batch, use `--dry-run` to inspect rows, query dates, and output names. Use `--limit N` only for a small input-order smoke test; for actual batch requests, filter the CSV upstream when the user wants a subset. If a crop succeeds but the bottom-strip OCR cannot parse an imagery date, `scripts/crop_csv_batch.mjs` retries from a fresh browser context by default (`--missing-ocr-retry-mode fresh-context`) instead of only reusing the same page; use `--missing-ocr-retry-mode same-page` only when you explicitly want the older lighter retry. For eval smoke tests, use the packaged normalized fixture `assets/test-data/permit-sample-10.csv`; do not rely on workspace-root sample files.
+Before running a long batch, use `--dry-run` to inspect rows, query dates, and output names. Use `--limit N` only for a small input-order smoke test; for actual batch requests, filter the CSV upstream when the user wants a subset. If a crop succeeds but the bottom-strip OCR cannot parse an imagery date, `scripts/crop_csv_batch.mjs` retries from a fresh browser context by default (`--missing-ocr-retry-mode fresh-context`) instead of only reusing the same page; use `--missing-ocr-retry-mode same-page` only when you explicitly want the older lighter retry. For eval smoke tests, use the packaged normalized fixture `assets/test-data/coordinate-sample-10.csv`; do not rely on workspace-root sample files.
 
 Shortcuts: `npm run install:playwright`, `npm run crop -- --location "LOCATION" --output crop.png`, `npm run crop:csv -- --csv normalized.csv --output output_dir`, `npm run eval`, `npm run eval:csv`, `npm run eval:csv:address`, `npm run eval:moorpark`, `npm run eval:full`, `npm run check`.
+
+## GIFs From Downloaded Images
+
+When the user asks for an animated GIF from already-downloaded crop images, use `assets/templates/gif_from_images.template.py` as a copy-and-customize starting point. Copy it to `/tmp`, edit the `CONFIG` block and any grouping/label helpers for the specific image names, then run the `/tmp` copy. Keep one-off GIF composition logic in the copied template rather than adding a new `scripts/` file; `scripts/` is for stable deterministic crop/eval runners, while GIF demos usually need request-specific layout, labels, selection, timing, and grouping rules.
+
+The template supports two common modes:
+
+- `before_after_grid`: finds paired files such as `NAME_before.png` and `NAME_after.png`, renders a fixed grid, and crossfades between the two states.
+- `timeseries_grid`: groups filenames by location key and date token, keeps each location in a stable grid position, and animates through dates.
+
+Use Pillow (`python3 -m pip install Pillow` if needed). ImageMagick's `magick` command is optional for GIF optimization. Write a small manifest JSON next to the GIF recording the selected bases/groups, frame count, source directory, and output path so the demo can be regenerated or audited later.
 
 ## Fast Path
 
@@ -84,4 +95,4 @@ npm run eval
 
 `npm run check` validates bundled scripts, templates, JSON files, and the packaged normalized CSV fixture. `npm run eval` runs the 10-coordinate Google Earth regression through `scripts/benchmark_google_earth_crop.mjs`.
 
-For the CSV batch eval in `evals/evals.json`, use `assets/test-data/permit-sample-10.csv` to cover coordinate rows and `assets/test-data/address-sample-2.csv` to cover address rows. Dry-run all normalized rows and confirm `output_name` already contains the requested before/after naming, then run the real smoke with `--limit 1` and outputs under `benchmark-runs/` so the PNG, JSON sidecar, and `batch-summary.json` stay with benchmark artifacts instead of `/tmp`. Use `assets/test-data/moorpark-date-ocr.csv` / `npm run eval:moorpark` for the Moorpark OCR regression: address `W 12801 MOORPARK, CA 91604`, cutoff `2014-12-18`, expected parsed `imageDateOcr` `2014-04-24`, and no `older` qualifier in the overlay or parsed OCR fields. Do not depend on workspace-root `permit_sample.csv`.
+For the CSV batch eval in `evals/evals.json`, use `assets/test-data/coordinate-sample-10.csv` to cover coordinate rows and `assets/test-data/address-sample-2.csv` to cover address rows. Dry-run all normalized rows and confirm `output_name` already contains the requested before/after naming, then run the real smoke with `--limit 1` and outputs under `benchmark-runs/` so the PNG, JSON sidecar, and `batch-summary.json` stay with benchmark artifacts instead of `/tmp`. Use `assets/test-data/moorpark-date-ocr.csv` / `npm run eval:moorpark` for the Moorpark OCR regression: address `W 12801 MOORPARK, CA 91604`, cutoff `2014-12-18`, expected parsed `imageDateOcr` `2014-04-24`, and no `older` qualifier in the overlay or parsed OCR fields. Do not depend on workspace-root project CSV files.

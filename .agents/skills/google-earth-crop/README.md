@@ -6,6 +6,10 @@ This skill captures Google Earth Web crops for places or coordinates, including 
 
 Default framing starts at zoom level 19 as a centered square neighborhood crop around the target, usually a few buildings rather than a city-scale map. If close historical imagery is blank or low-detail, the skill tries zoom 18, then 1000m with one same-range retry, then 1500m.
 
+
+![4x4 before/after Google Earth crop demo](../../../data/google_earth_crop_before_after_grid.gif)
+
+
 ## How To Prompt It
 
 Ask for the skill by name and include a location plus cutoff date.
