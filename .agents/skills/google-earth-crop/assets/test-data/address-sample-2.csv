@@ -1,0 +1,3 @@
+address,query_date,output_name,address_key
+"1150 Amsterdam Ave, New York, NY 10027",2025-01-01,1150_amsterdam_before,1150_amsterdam
+"1150 Amsterdam Ave, New York, NY 10027",2027-01-01,1150_amsterdam_after,1150_amsterdam

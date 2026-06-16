@@ -25,7 +25,7 @@ npx playwright install chromium
 Use the bundled scripts before reimplementing the Playwright flow:
 
 - One-off crop: `node scripts/crop_google_earth.mjs --location "LOCATION" --cutoff YYYY-MM-DD --output path/to/crop.png`
-- CSV batch requests: follow the Batch Crop Template section below; copy `assets/templates/csv_batch_runner.template.mjs` to `/tmp` and customize only the temporary copy.
+- CSV batch: `node scripts/crop_csv_batch.mjs --csv normalized.csv --output output_dir`. Each CSV row must have `query_date`, `output_name`, and one location source: either `lat`+`lon` or `address`.
 - JSON report: written by default next to the PNG using the same basename and `.json` extension. Add `--summary path/to/report.json` to override or `--no-summary` to skip.
 - Zoom control: omit `--zoom-level` to use default zoom 19, or add `--zoom-level 21` for tighter roof-level crops. This patches both the Google Earth URL altitude (`a`) and camera range (`d`) fields; it is true source zoom, not a post-capture crop. When a zoom crop fails validation, the scripts try lower zoom levels down to zoom 18, then `--intermediate-fallback-camera-altitude` (`1000m` default) with one same-range retry, then `--large-fallback-camera-altitude` (`1500m` default).
 - Custom clip: add `--clip x,y,width,height`. Default is a `780x780` square centered on the query/camera point.
@@ -34,17 +34,26 @@ Use the bundled scripts before reimplementing the Playwright flow:
 - Wider context: add `--preferred-camera-altitude meters` to bypass zoom-level fallback. Default preferred altitude/range is `500`; the script may fall back wider to avoid blank or low-detail crops.
 - Shared implementation: `scripts/google_earth_crop_core.mjs` contains URL readiness, `/data=` date patching, render settle, splash/blank checks, and low-detail checks.
 
-For normal crop requests, run or adapt `scripts/crop_google_earth.mjs`. For batch requests, generate a temporary script from `assets/templates/csv_batch_runner.template.mjs`; it reuses one browser/page, calls `cropGoogleEarth`, writes PNG+JSON sidecars, and writes `batch-summary.json`. Treat the Fast Path below as the behavioral contract for custom code. Only recreate the Playwright sequence manually if the template cannot fit the requested output.
+For normal crop requests, run or adapt `scripts/crop_google_earth.mjs`. For batch requests, run `scripts/crop_csv_batch.mjs` against a normalized CSV; it reuses one browser/page, calls `cropGoogleEarth`, writes PNG+JSON sidecars, and writes `batch-summary.json`. Treat the Fast Path below as the behavioral contract for custom code.
 
-## Batch Crop Template
+## CSV Batch
 
-Use `assets/templates/csv_batch_runner.template.mjs` as the reusable scaffold for future bulk requests. Do not run arbitrary user CSVs directly through the packaged template and do not edit the packaged template for one user run. Instead, inspect the user's CSV headers and request, copy the template to a task-specific file under `/tmp`, customize only the mapping section, run a `--dry-run`, then run the generated `/tmp` script.
+Use `scripts/crop_csv_batch.mjs` for the standard batch path. Its input is deterministic and supports two canonical row formats:
 
-The template supports coordinates or address-style headers before customization. Date rules are intentionally customizable because user requests vary. For mapping examples, multiple-date rules, and the stable lower-level pieces to preserve, read `references/csv-batch-template.md`.
+- Coordinate rows: `lat`, `lon`, `query_date`, `output_name`
+- Address rows: `address`, `query_date`, `output_name`
 
-Before running a long batch, use `--dry-run` to inspect eligible rows and derived cutoffs. Use `--limit N` only for a small input-order smoke test; for actual batch requests, filter the CSV upstream when the user wants a subset. For template/eval smoke tests, use the packaged fixture `assets/test-data/permit-sample-10.csv`; do not rely on workspace-root sample files. Delete or leave the `/tmp` generated script after the run; it is ephemeral and should not be committed.
+`query_date` must be `YYYY-MM-DD` and is passed as the crop cutoff date. `output_name` is the PNG basename; include request-specific labels such as `addr_tract_key_before` or `addr_tract_key_after` there. Optional metadata column: `address_key`. If `address` is present with `lat`/`lon`, `lat`/`lon` is used as the location and `address` is kept as metadata.
 
-Shortcuts: `npm run install:playwright`, `npm run crop -- --location "LOCATION" --output crop.png`, `npm run eval`, `npm run eval:full`, `npm run check`.
+If a user's CSV does not already match this schema, copy `assets/templates/normalize_csv.template.mjs` to `/tmp`, customize `normalizeRecordToRows()` for the source headers and date rules, write a normalized CSV, inspect it, then run `scripts/crop_csv_batch.mjs`. Keep generated normalizer scripts under `/tmp`; do not commit per-request converters.
+
+Keep `assets/templates/csv_batch_runner.template.mjs` only as an escape hatch for unusual custom workflows that cannot be represented as normalized `query_date`/`output_name` rows with either `lat`/`lon` or `address`. The deterministic batch script should be the default.
+
+For normalization examples, multiple-date rules, and the stable lower-level pieces to preserve, read `references/csv-batch-template.md`.
+
+Before running a long batch, use `--dry-run` to inspect rows, query dates, and output names. Use `--limit N` only for a small input-order smoke test; for actual batch requests, filter the CSV upstream when the user wants a subset. For eval smoke tests, use the packaged normalized fixture `assets/test-data/permit-sample-10.csv`; do not rely on workspace-root sample files.
+
+Shortcuts: `npm run install:playwright`, `npm run crop -- --location "LOCATION" --output crop.png`, `npm run crop:csv -- --csv normalized.csv --output output_dir`, `npm run eval`, `npm run eval:csv`, `npm run eval:csv:address`, `npm run eval:full`, `npm run check`.
 
 ## Fast Path
 
@@ -73,6 +82,6 @@ npm run check
 npm run eval
 ```
 
-`npm run check` validates bundled scripts, JSON files, and the packaged CSV fixture. `npm run eval` runs the 10-coordinate Google Earth regression through `scripts/benchmark_google_earth_crop.mjs`.
+`npm run check` validates bundled scripts, templates, JSON files, and the packaged normalized CSV fixture. `npm run eval` runs the 10-coordinate Google Earth regression through `scripts/benchmark_google_earth_crop.mjs`.
 
-For the CSV batch eval in `evals/evals.json`, use `assets/test-data/permit-sample-10.csv`: copy `assets/templates/csv_batch_runner.template.mjs` to `/tmp`, customize `mapRecordToCropJobs()` for `permit_effective_date` before/after cutoffs, dry-run all 10 rows to confirm 20 planned crops, then run the real smoke with `--limit 1`. Do not depend on workspace-root `permit_sample.csv`.
+For the CSV batch eval in `evals/evals.json`, use `assets/test-data/permit-sample-10.csv` to cover coordinate rows and `assets/test-data/address-sample-2.csv` to cover address rows. Dry-run all normalized rows and confirm `output_name` already contains the requested before/after naming, then run the real smoke with `--limit 1` and outputs under `benchmark-runs/` so the PNG, JSON sidecar, and `batch-summary.json` stay with benchmark artifacts instead of `/tmp`. Do not depend on workspace-root `permit_sample.csv`.

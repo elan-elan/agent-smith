@@ -15,6 +15,8 @@ Examples:
 - `Use the google-earth-crop skill to get an image for "1150 Amsterdam Ave, New York, NY 10027" before 2025-01-01.`
 - `Use google-earth-crop to capture "1150 Amsterdam Ave, New York, NY 10027" before 2025-01-01, 2024-01-01, and 2023-01-01.`
 - `Use google-earth-crop for coordinates "45.6273,-122.6716" before 2020-01-01 and save the output under crops/vancouver-wa/`.
+- `Use google-earth-crop to batch crop this CSV. It already has lat, lon, query_date, and output_name columns.`
+- `Use google-earth-crop to batch crop this CSV. It has address, query_date, and output_name columns.`
 - `Run the google-earth-crop benchmark/eval.`
 
 Cutoff dates are exclusive: asking for imagery before `2025-01-01` targets `2024-12-31`.
@@ -42,11 +44,21 @@ npm run install:playwright
 
 Requirements: Node.js 18+, npm, and network access to Google Earth Web.
 
-## Benchmark
+## CSV Batches
+
+The deterministic batch runner expects normalized CSV input with `query_date`, `output_name`, and one location source: either `lat`+`lon` or `address`:
+
+```bash
+npm run crop:csv -- --csv normalized.csv --output crops/batch
+```
+
+If your CSV has different headers, addresses, multiple dates, or custom date rules, the agent should first copy `assets/templates/normalize_csv.template.mjs` to `/tmp`, customize it, generate a normalized CSV, inspect it with `--dry-run`, and then run `scripts/crop_csv_batch.mjs`.
+
+## Eval
 
 Prompt: `Run the google-earth-crop benchmark/eval.`
 
-A passing run should report `total: 10`, `ok: 10`, `failed: 0`, and no splash, blank, or low-detail detections. Benchmark artifacts are written under `benchmark-runs/` and are ignored by git.
+A passing run should report `total: 10`, `ok: 10`, `failed: 0`, and no splash, blank, or low-detail detections. Benchmark artifacts are written under `benchmark-runs/` and are ignored by git. The coordinate CSV batch smoke test uses `npm run eval:csv`; the address CSV batch smoke test uses `npm run eval:csv:address`.
 
 For a fast source check without launching Google Earth, run `npm run check` from the skill directory.
 

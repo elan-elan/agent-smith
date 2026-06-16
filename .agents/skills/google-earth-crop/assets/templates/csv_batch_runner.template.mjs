@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+// Escape hatch only: the default CSV batch path is scripts/crop_csv_batch.mjs with
+// normalized query_date/output_name plus lat/lon or address input. Prefer assets/templates/normalize_csv.template.mjs
+// for adapting arbitrary source CSVs into that deterministic format.
+
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
