@@ -60,7 +60,7 @@ function normalizeRecordToRows(raw, { sourceLine }) {
   }];
 
   // Example for a source row with one event date that should produce before/after crops:
-  // const eventDate = dateFromColumn(raw, ['permit_effective_date', 'event_date']);
+  // const eventDate = dateFromColumn(raw, ['source_event_date', 'event_date']);
   // const addressKey = firstPresent(raw, ['addr_tract_key', 'address_key', 'id']) ?? `row-${sourceLine}`;
   // return [
   //   { lat, lon, query_date: formatIsoDate(addYears(eventDate, -1)), output_name: `${addressKey}_before`, address, address_key: addressKey },

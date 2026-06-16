@@ -77,7 +77,7 @@ address,query_date,output_name,address_key
 Prompt-derived before/after filenames in the normalizer:
 
 ```js
-const eventDate = dateFromColumn(raw, ['permit_effective_date', 'event_date']);
+const eventDate = dateFromColumn(raw, ['source_event_date', 'event_date']);
 const addressKey = firstPresent(raw, ['addr_tract_key', 'address_key', 'id']);
 const address = firstPresent(raw, ['address', 'full_address', 'site_address']);
 return [
@@ -113,7 +113,7 @@ Other derived requests belong in the `/tmp` normalizer copy. Examples: deriving 
 
 ## Test Fixture
 
-For batch smoke tests, use `assets/test-data/permit-sample-10.csv` for coordinate rows and `assets/test-data/address-sample-2.csv` for address rows. They are already normalized and packaged with the skill so tests do not depend on workspace-root data files. A good smoke pattern is to dry-run all rows, then run the real crop with `--limit 1` and an output under `benchmark-runs/`. Keep the smoke PNG, compact JSON sidecar, and `batch-summary.json` under `benchmark-runs/` so batch test artifacts live beside the benchmark outputs instead of in `/tmp`.
+For batch smoke tests, use `assets/test-data/coordinate-sample-10.csv` for coordinate rows and `assets/test-data/address-sample-2.csv` for address rows. They are already normalized and packaged with the skill so tests do not depend on workspace-root data files. A good smoke pattern is to dry-run all rows, then run the real crop with `--limit 1` and an output under `benchmark-runs/`. Keep the smoke PNG, compact JSON sidecar, and `batch-summary.json` under `benchmark-runs/` so batch test artifacts live beside the benchmark outputs instead of in `/tmp`.
 
 ## Keep Stable
 
