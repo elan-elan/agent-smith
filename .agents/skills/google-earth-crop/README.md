@@ -6,30 +6,9 @@ This skill captures Google Earth Web crops for places or coordinates, including 
 
 Default framing starts at zoom level 19 as a centered square neighborhood crop around the target, usually a few buildings rather than a city-scale map. If close historical imagery is blank or low-detail, the skill tries zoom 18, then 1000m with one same-range retry, then 1500m.
 
-## Before/After GIF Demo
-
-This 4x4 before/after GIF shows a generic paired-crop animation built from downloaded Google Earth images:
 
 ![4x4 before/after Google Earth crop demo](../../../data/google_earth_crop_before_after_grid.gif)
 
-The selected locations used in the demo are recorded in [`data/google_earth_crop_demo_selection.json`](../../../data/google_earth_crop_demo_selection.json).
-
-## GIF Template
-
-For future GIFs from downloaded crop images, copy [`assets/templates/gif_from_images.template.py`](assets/templates/gif_from_images.template.py) to `/tmp`, customize the `CONFIG` block, and run the copy:
-
-```bash
-cp .agents/skills/google-earth-crop/assets/templates/gif_from_images.template.py /tmp/make_crop_gif.py
-python3 /tmp/make_crop_gif.py
-```
-
-The template includes a before/after grid mode and a time-series grid mode. A template is a better fit than a committed `scripts/` runner for this because GIF demos tend to need per-request edits: image grouping, labels, ordering, tile size, timing, captions, and selection rules. The skill's `scripts/` directory is reserved for stable crop and eval workflows.
-
-The template uses Pillow. Install it if your active Python environment does not already have it:
-
-```bash
-python3 -m pip install Pillow
-```
 
 ## How To Prompt It
 
