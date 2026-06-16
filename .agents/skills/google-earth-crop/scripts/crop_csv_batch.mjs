@@ -34,6 +34,7 @@ const outputOption = cliOptionValue('output');
 const rowLimit = parseOptionalPositiveInteger(cliOptionValue('limit'), '--limit');
 const cropRetries = Number(cliOptionValue('crop-retries') ?? 1);
 const missingOcrRetries = Number(cliOptionValue('missing-ocr-retries') ?? 1);
+const missingOcrRetryMode = cliOptionValue('missing-ocr-retry-mode') ?? 'fresh-context';
 const renderSettleMs = Number(cliOptionValue('render-settle-ms') ?? DEFAULT_RENDER_SETTLE_MS);
 const explicitPreferredAltitude = cliOptionValue('preferred-camera-altitude') ?? cliOptionValue('max-camera-altitude');
 const zoomLevel = cliOptionValue('zoom-level') ? Number(cliOptionValue('zoom-level')) : (explicitPreferredAltitude ? null : DEFAULT_ZOOM_LEVEL);
@@ -60,6 +61,7 @@ if (csvOption == null) throw new Error('--csv is required');
 if (outputOption == null) throw new Error('--output is required');
 if (!Number.isFinite(cropRetries) || cropRetries < 0) throw new Error('--crop-retries must be zero or greater');
 if (!Number.isFinite(missingOcrRetries) || missingOcrRetries < 0) throw new Error('--missing-ocr-retries must be zero or greater');
+if (!['fresh-context', 'same-page'].includes(missingOcrRetryMode)) throw new Error('--missing-ocr-retry-mode must be fresh-context or same-page');
 
 const csvPath = path.resolve(csvOption);
 const outputDir = path.resolve(outputOption);
@@ -97,9 +99,17 @@ await fs.mkdir(outputDir, { recursive: true });
 
 const chromium = await loadChromium();
 const browser = await launchChromium(chromium, { headed: cliFlag('headed') });
-const context = await browser.newContext({ viewport });
-const page = await context.newPage();
-page.setDefaultTimeout(20000);
+let context = null;
+let page = null;
+
+async function openFreshPage() {
+  await context?.close().catch(() => {});
+  context = await browser.newContext({ viewport });
+  page = await context.newPage();
+  page.setDefaultTimeout(20000);
+}
+
+await openFreshPage();
 
 const perCrop = [];
 const perLocation = [];
@@ -113,7 +123,7 @@ try {
     const previousCameraForReadiness = row.locationKind === 'address' && row.location === lastConfirmedLocation
       ? null
       : lastConfirmedCamera;
-    const result = await cropWithRetries(page, {
+    const result = await cropWithRetries(() => page, {
       location: row.location,
       outputPath: temporaryOutputPath,
       cutoffDate: row.queryDate,
@@ -133,7 +143,14 @@ try {
       previousCamera: previousCameraForReadiness,
       index: rowIndex + 1,
       label: baseLabel
-    }, { cropRetries, missingOcrRetries });
+    }, {
+      cropRetries,
+      missingOcrRetries,
+      missingOcrRetryMode,
+      resetPageForMissingOcr: async () => {
+        await openFreshPage();
+      }
+    });
 
     const finalOutputPath = path.join(outputDir, `${baseLabel}.png`);
     const jsonPath = defaultSummaryPath(finalOutputPath);
@@ -157,6 +174,7 @@ try {
     console.log(`${result.status.toUpperCase()} ${rowIndex + 1}/${plannedCropCount} ${path.basename(finalOutputPath)} cutoff=${row.queryDate} selected=${result.selectedDate ?? 'none'} ${result.totalMs}ms`);
   }
 } finally {
+  await context?.close().catch(() => {});
   await browser.close();
   await terminateImageryDateOcrWorker();
 }
@@ -184,6 +202,7 @@ const batchReport = {
   markerRadius,
   includeDateLabel,
   extractImageryDate,
+  missingOcrRetryMode,
   imageryDateOcrRetries,
   imageryDateOcrRetryWaitMs,
   viewport,
@@ -251,25 +270,32 @@ function planRow({ raw, sourceLine }) {
   };
 }
 
-async function cropWithRetries(page, cropOptions, { cropRetries: retries, missingOcrRetries: ocrRetries }) {
+async function cropWithRetries(getPage, cropOptions, { cropRetries: retries, missingOcrRetries: ocrRetries, missingOcrRetryMode: ocrRetryMode, resetPageForMissingOcr }) {
   let finalResult = null;
   const maxAttempts = Math.max(retries, ocrRetries) + 1;
+  let currentCropOptions = cropOptions;
   for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex += 1) {
-    const result = await cropGoogleEarth(page, cropOptions);
+    const result = await cropGoogleEarth(getPage(), currentCropOptions);
     result.batchAttempt = attemptIndex + 1;
+    result.missingOcrRetryMode = ocrRetryMode;
     finalResult = result;
     const canRetryError = result.status !== 'ok' && attemptIndex < retries;
     const canRetryMissingOcr = result.status === 'ok'
-      && cropOptions.extractImageryDate
+      && currentCropOptions.extractImageryDate
       && !isPlausibleOcrDate(result.dateLabel?.ocr?.imageryDate)
       && attemptIndex < ocrRetries;
     if (!canRetryError && !canRetryMissingOcr) return result;
     if (canRetryMissingOcr) {
-      console.warn(`RETRY ${cropOptions.label} attempt=${attemptIndex + 2} previous=missing-or-implausible image date`);
+      console.warn(`RETRY ${currentCropOptions.label} attempt=${attemptIndex + 2} previous=missing-or-implausible image date mode=${ocrRetryMode}`);
+      if (ocrRetryMode === 'fresh-context') {
+        await resetPageForMissingOcr?.();
+        currentCropOptions = { ...currentCropOptions, previousCamera: null };
+        continue;
+      }
     } else {
-      console.warn(`RETRY ${cropOptions.label} attempt=${attemptIndex + 2} previous=${String(result.error || 'unknown').slice(0, 160)}`);
+      console.warn(`RETRY ${currentCropOptions.label} attempt=${attemptIndex + 2} previous=${String(result.error || 'unknown').slice(0, 160)}`);
     }
-    await page.waitForTimeout(1500);
+    await getPage().waitForTimeout(1500);
   }
   return finalResult;
 }
@@ -470,6 +496,7 @@ Options:
   --limit                Optional positive row prefix limit for smoke tests
   --crop-retries         Full crop retries after core fallbacks fail. Default: 1
   --missing-ocr-retries  Retry successful crops that did not parse an imagery date. Default: 1
+  --missing-ocr-retry-mode  How missing-OCR retries reset state: fresh-context or same-page. Default: fresh-context
   --dry-run              Print planned rows without opening Google Earth
   --headed               Show Chromium for debugging
 

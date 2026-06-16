@@ -31,7 +31,7 @@ Each crop writes:
 ```
 
 The JSON sidecar is intentionally small and flat: `address`, `addressKey`, `dateUsed`, `cutoffDate`, `location`, `outputPath`, `zoomLevel`, `googleEarthQueryUrl`, and `imageDateOcr`.
-The PNG includes a centered red dot at the queried location by default, appends the visible Google Earth bottom date/status strip below the crop for manual inspection, and overlays `Image date: ...` at top left when OCR finds a visible Google Earth image date.
+The PNG includes a centered red dot at the queried location by default, appends the visible Google Earth bottom date/status strip below the crop for manual inspection, and overlays `Image date: ...` at top left when OCR finds a visible Google Earth image date. Qualifiers such as `older` are accepted during OCR parsing but are not included in the overlay or JSON date value.
 
 ## Setup Notes
 
@@ -54,11 +54,13 @@ npm run crop:csv -- --csv normalized.csv --output crops/batch
 
 If your CSV has different headers, addresses, multiple dates, or custom date rules, the agent should first copy `assets/templates/normalize_csv.template.mjs` to `/tmp`, customize it, generate a normalized CSV, inspect it with `--dry-run`, and then run `scripts/crop_csv_batch.mjs`.
 
+The crop engine OCRs the already-visible bottom date/status strip before opening historical imagery controls, because menu toggles can hide or change the visible date. When a batch crop succeeds but the visible date OCR fails, the deterministic runner retries from a fresh browser context by default (`--missing-ocr-retry-mode fresh-context`). This is slower than the old same-page retry, but it gives Google Earth a clean screen state before giving up; use `--missing-ocr-retry-mode same-page` only for lightweight diagnostics.
+
 ## Eval
 
 Prompt: `Run the google-earth-crop benchmark/eval.`
 
-A passing run should report `total: 10`, `ok: 10`, `failed: 0`, and no splash, blank, or low-detail detections. Benchmark artifacts are written under `benchmark-runs/` and are ignored by git. The coordinate CSV batch smoke test uses `npm run eval:csv`; the address CSV batch smoke test uses `npm run eval:csv:address`.
+A passing run should report `total: 10`, `ok: 10`, `failed: 0`, and no splash, blank, or low-detail detections. Benchmark artifacts are written under `benchmark-runs/` and are ignored by git. The coordinate CSV batch smoke test uses `npm run eval:csv`; the address CSV batch smoke test uses `npm run eval:csv:address`; the Moorpark date-only OCR regression uses `npm run eval:moorpark`.
 
 For a fast source check without launching Google Earth, run `npm run check` from the skill directory.
 

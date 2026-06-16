@@ -57,6 +57,29 @@
         "Each per-image JSON sidecar contains only address, addressKey, dateUsed, cutoffDate, location, outputPath, zoomLevel, googleEarthQueryUrl, and imageDateOcr, plus error only for failed crops.",
         "Verbose timing, retry, camera, marker, image-quality, OCR debug, and validation details stay in batch-summary.json rather than per-image sidecars."
       ]
+    },
+    {
+      "id": 3,
+      "prompt": "Use the google-earth-crop skill to run the packaged Moorpark date OCR regression. From the skill directory, run node scripts/crop_csv_batch.mjs --csv assets/test-data/moorpark-date-ocr.csv --output benchmark-runs/moorpark-date-ocr --missing-ocr-retries 0. The fixture contains address W 12801 MOORPARK, CA 91604 with query_date 2014-12-18 and output_name W_12801_MOORPARK_ST_CA_000_143400_before. Report the PNG path, compact JSON sidecar path, selected timeline date, parsed imageDateOcr, whether the appended strip was saved, whether a top-left overlay was included, and any OCR errors.",
+      "expected_output": "A one-row deterministic CSV batch run using assets/test-data/moorpark-date-ocr.csv, not a custom /tmp runner. It should create benchmark-runs/moorpark-date-ocr/W_12801_MOORPARK_ST_CA_000_143400_before.png, the adjacent compact JSON sidecar, and batch-summary.json. The crop should select timeline date 2014-12-17 for cutoff 2014-12-18. The visible bottom status strip should be appended to the PNG, OCR should parse the visible imagery date as 2014-04-24, and the overlay text should be exactly Image date: 2014-04-24 without older/newer qualifiers. The sidecar imageDateOcr should be exactly 2014-04-24. batch-summary.json may retain raw OCR debug text such as older-4/24/2014 or OCR misspellings, but parsed/stored OCR result fields and overlay text should contain only the actual ISO date.",
+      "files": [
+        "SKILL.md",
+        "README.md",
+        "scripts/crop_csv_batch.mjs",
+        "scripts/google_earth_crop_core.mjs",
+        "scripts/ocr_date_label.mjs",
+        "assets/test-data/moorpark-date-ocr.csv"
+      ],
+      "expectations": [
+        "The eval uses packaged fixture assets/test-data/moorpark-date-ocr.csv and does not depend on workspace-root permit_sample.csv or a generated /tmp crop runner.",
+        "The fixture row has address W 12801 MOORPARK, CA 91604, query_date 2014-12-18, output_name W_12801_MOORPARK_ST_CA_000_143400_before, and address_key W_12801_MOORPARK_ST_CA_000_143400.",
+        "The crop verifies selectedDate equals 2014-12-17 before saving output.",
+        "The saved PNG includes the centered crop, red target dot, and appended visible Google Earth bottom date/status strip.",
+        "The top-left overlay text is Image date: 2014-04-24 and does not include older, newer, newest, or latest.",
+        "The compact per-image JSON sidecar includes imageDateOcr exactly equal to 2014-04-24 and does not store an OCR qualifier.",
+        "The batch summary reports dateLabelIncluded=1, dateLabelStripAppended=1, imageryDateExtracted=1, ok=1, and failed=0.",
+        "Raw OCR debug text in batch-summary.json may include the visible Google Earth qualifier or OCR misspellings, but parsed OCR fields and user-facing overlay/sidecar values contain only the actual ISO date."
+      ]
     }
   ]
 }

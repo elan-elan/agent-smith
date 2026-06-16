@@ -525,8 +525,7 @@ function dateLabelForViewport(clip, viewport, { enabled }) {
 
 function imageDateOverlayText(ocr) {
   if (!ocr?.imageryDate) return null;
-  const qualifier = ocr.qualifier ? `${ocr.qualifier} ` : '';
-  return `Image date: ${qualifier}${ocr.imageryDate}`;
+  return `Image date: ${ocr.imageryDate}`;
 }
 
 export async function extractImageryDateFromStrip(stripPng) {
@@ -539,7 +538,6 @@ export async function extractImageryDateFromStrip(stripPng) {
     source: 'tesseract.js-bottom-strip',
     text,
     imageryDate: parsed?.imageryDate ?? fallback?.imageryDate ?? null,
-    qualifier: parsed?.qualifier ?? fallback?.qualifier ?? null,
     confidence: Number.isFinite(data.confidence) ? Number(data.confidence.toFixed(1)) : null,
     fallback
   };
@@ -563,7 +561,6 @@ export async function extractImageryDateFromAppendedStrip(imagePath, { stripHeig
     source: 'tesseract.js-appended-bottom-strip',
     text,
     imageryDate: parsed?.imageryDate ?? fallback?.imageryDate ?? null,
-    qualifier: parsed?.qualifier ?? fallback?.qualifier ?? null,
     confidence: Number.isFinite(data.confidence) ? Number(data.confidence.toFixed(1)) : null,
     fallback,
     rectangle
@@ -607,7 +604,7 @@ function normalizeImageryDateOcrText(text) {
 }
 
 function parseImageryDateFromOcrText(text) {
-  const match = text.match(/(?:(older|newer|newest|latest)\s*[-<: ]*)?(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{4})/i);
+  const match = text.match(/(?:(older|okder|0lder|newer|newest|latest)\s*[-<: ]*)?(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{4})/i);
   if (!match) return null;
 
   const month = Number(match[2]);
@@ -617,8 +614,7 @@ function parseImageryDateFromOcrText(text) {
   if (!imageryDate) return null;
 
   return {
-    imageryDate,
-    qualifier: match[1]?.toLowerCase() ?? null
+    imageryDate
   };
 }
 
@@ -639,7 +635,6 @@ async function extractImageryDateFromProcessedStrip(worker, stripPng) {
       source: `tesseract.js-processed-bottom-strip:${candidate.name}`,
       text,
       imageryDate: parsed?.imageryDate ?? null,
-      qualifier: parsed?.qualifier ?? null,
       confidence: Number.isFinite(data.confidence) ? Number(data.confidence.toFixed(1)) : null
     };
     if (result.imageryDate) return result;
@@ -650,14 +645,22 @@ async function extractImageryDateFromProcessedStrip(worker, stripPng) {
 
 function processedStripOcrCandidates(stripPng) {
   const { width, height, data } = decodePngRgba(stripPng);
+  const bottomBand = cropRgbaRegion(data, width, height, {
+    left: 0,
+    top: Math.max(0, height - 24),
+    width,
+    height: Math.min(24, height)
+  });
   return [
+    buildThresholdStripPng(bottomBand.data, bottomBand.width, bottomBand.height, { scale: 4, threshold: 210, name: 'bottom24' }),
+    buildThresholdStripPng(bottomBand.data, bottomBand.width, bottomBand.height, { scale: 3, threshold: 180, name: 'bottom24' }),
     buildThresholdStripPng(data, width, height, { scale: 3, threshold: 190 }),
     buildThresholdStripPng(data, width, height, { scale: 2, threshold: 190 }),
     buildThresholdStripPng(data, width, height, { scale: 3, threshold: 150 })
   ];
 }
 
-function buildThresholdStripPng(data, width, height, { scale, threshold }) {
+function buildThresholdStripPng(data, width, height, { scale, threshold, name = null }) {
   const outputWidth = width * scale;
   const outputHeight = height * scale;
   const pixels = Buffer.alloc(outputWidth * outputHeight);
@@ -671,9 +674,23 @@ function buildThresholdStripPng(data, width, height, { scale, threshold }) {
     }
   }
   return {
-    name: `scale${scale}-threshold${threshold}`,
+    name: `${name ? `${name}-` : ''}scale${scale}-threshold${threshold}`,
     png: encodeGrayscalePng(outputWidth, outputHeight, pixels)
   };
+}
+
+function cropRgbaRegion(data, sourceWidth, sourceHeight, rectangle) {
+  const left = Math.max(0, Math.min(sourceWidth - 1, Math.floor(rectangle.left)));
+  const top = Math.max(0, Math.min(sourceHeight - 1, Math.floor(rectangle.top)));
+  const cropWidth = Math.max(1, Math.min(sourceWidth - left, Math.floor(rectangle.width)));
+  const cropHeight = Math.max(1, Math.min(sourceHeight - top, Math.floor(rectangle.height)));
+  const pixels = Buffer.alloc(cropWidth * cropHeight * 4);
+  for (let yPosition = 0; yPosition < cropHeight; yPosition += 1) {
+    const sourceStart = ((top + yPosition) * sourceWidth + left) * 4;
+    const sourceEnd = sourceStart + cropWidth * 4;
+    data.copy(pixels, yPosition * cropWidth * 4, sourceStart, sourceEnd);
+  }
+  return { width: cropWidth, height: cropHeight, data: pixels };
 }
 
 function cropPngStrip(image, rectangle) {
@@ -794,11 +811,11 @@ function crc32(buffer) {
 }
 
 async function captureImageryDateLabelStrip(page, clip, { extractImageryDate, retries, retryWaitMs } = {}) {
-  await showHistoricalImageryUi(page);
   const retryLimit = Math.max(0, Math.floor(Number.isFinite(retries) ? retries : DEFAULT_IMAGERY_DATE_OCR_RETRIES));
   const waitMs = Math.max(0, Math.floor(Number.isFinite(retryWaitMs) ? retryWaitMs : DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS));
   const maxAttempts = extractImageryDate ? retryLimit + 1 : 1;
   let latest = null;
+  let historicalUiShown = false;
 
   for (let attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber += 1) {
     const strip = await page.screenshot({ fullPage: false, scale: 'css', clip });
@@ -821,6 +838,11 @@ async function captureImageryDateLabelStrip(page, clip, { extractImageryDate, re
     };
 
     if (ocr.imageryDate || attemptNumber === maxAttempts) return latest;
+
+    if (!historicalUiShown && attemptNumber === Math.min(2, maxAttempts - 1)) {
+      await showHistoricalImageryUi(page).catch(() => {});
+      historicalUiShown = true;
+    }
     await page.waitForTimeout(waitMs);
   }
 
