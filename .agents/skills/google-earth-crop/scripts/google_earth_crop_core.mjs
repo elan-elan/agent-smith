@@ -27,7 +27,8 @@ const ROOF_ZOOM_LEVEL_RANGE_METERS = 75;
 const HISTORICAL_TILE_REFRESH_OLDER = { x: 300, y: 120 };
 const HISTORICAL_TILE_REFRESH_NEWER = { x: 420, y: 120 };
 const CENTER_SHARPNESS_CROP_RATIO = 0.55;
-const LOWER_ZOOM_EXTENT_CROP_RATIO = 0.6;
+const LOWER_ZOOM_EXTENT_CROP_RATIO = 0.5;
+const RECOVERY_EXTENT_CROP_RATIO = 0.3;
 let imageryDateOcrWorkerPromise = null;
 
 export function optionValue(name, args = process.argv) {
@@ -273,9 +274,11 @@ export async function cropGoogleEarth(page, options) {
 
         let output = screenshot;
         if (matchRequestedZoomExtent) {
-          const zoomExtentCrop = await cropLowerZoomFallbackToRequestedExtent(page, output, {
+          const zoomExtentCrop = await cropFallbackToRequestedExtent(page, output, {
             requestedZoomLevel,
-            finalZoomLevel: attempt.finalZoomLevel
+            finalZoomLevel: attempt.finalZoomLevel,
+            fallbackStep: candidate.fallbackStep,
+            requestedCameraAltitude: candidate.cameraAltitude
           });
           if (zoomExtentCrop.applied) {
             output = zoomExtentCrop.image;
@@ -1212,13 +1215,44 @@ async function overlayImageDateText(page, imagePng, text) {
   };
 }
 
-async function cropLowerZoomFallbackToRequestedExtent(page, imagePng, { requestedZoomLevel, finalZoomLevel }) {
+async function cropFallbackToRequestedExtent(page, imagePng, { requestedZoomLevel, finalZoomLevel, fallbackStep, requestedCameraAltitude }) {
+  if (!Number.isFinite(requestedZoomLevel)) {
+    return { applied: false, image: imagePng };
+  }
+
+  if (fallbackStep === 'intermediate-fallback' || fallbackStep === 'large-fallback') {
+    return cropAndResizeCenter(page, imagePng, {
+      cropRatio: RECOVERY_EXTENT_CROP_RATIO,
+      metadata: {
+        strategy: 'recovery-range-center-crop-resize',
+        requestedZoomLevel,
+        finalZoomLevel: null,
+        fallbackStep,
+        requestedCameraAltitude
+      }
+    });
+  }
+
   const zoomDelta = requestedZoomLevel - finalZoomLevel;
-  if (!Number.isFinite(requestedZoomLevel) || !Number.isFinite(finalZoomLevel) || !Number.isFinite(zoomDelta) || zoomDelta <= 0) {
+  if (!Number.isFinite(finalZoomLevel) || !Number.isFinite(zoomDelta) || zoomDelta <= 0) {
     return { applied: false, image: imagePng };
   }
 
   const cropRatio = Math.max(0.01, Math.min(1, LOWER_ZOOM_EXTENT_CROP_RATIO ** zoomDelta));
+  return cropAndResizeCenter(page, imagePng, {
+    cropRatio,
+    metadata: {
+      strategy: 'lower-zoom-center-crop-resize',
+      requestedZoomLevel,
+      finalZoomLevel,
+      zoomDelta,
+      fallbackStep,
+      requestedCameraAltitude
+    }
+  });
+}
+
+async function cropAndResizeCenter(page, imagePng, { cropRatio, metadata }) {
   const imageDataUrl = `data:image/png;base64,${imagePng.toString('base64')}`;
   const result = await page.evaluate(async ({ imageDataUrl, cropRatio }) => {
     const loadImage = (source) => new Promise((resolve, reject) => {
@@ -1253,10 +1287,7 @@ async function cropLowerZoomFallbackToRequestedExtent(page, imagePng, { requeste
     image: Buffer.from(result.base64, 'base64'),
     metadata: {
       applied: true,
-      strategy: 'lower-zoom-center-crop-resize',
-      requestedZoomLevel,
-      finalZoomLevel,
-      zoomDelta,
+      ...metadata,
       cropRatio: Number(cropRatio.toFixed(6)),
       sourceCrop: result.sourceCrop,
       outputSize: result.outputSize

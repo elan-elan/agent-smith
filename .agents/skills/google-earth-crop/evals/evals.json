@@ -20,7 +20,7 @@
         "Each crop verifies the injected selectedDate equals 2019-12-31 before the first historical refresh attempt; the final saved selectedDate may be older only when a guarded refresh candidate passes quality and remains on or before 2019-12-31.",
         "Each coordinate search requires URL camera proximity within 0.02 degrees of the requested lat/lon rather than relying only on movement from the previous camera.",
         "Each output PNG is a centered square crop by default and includes a red dot at the query/camera center; benchmark-summary.json records marker visibility, centered/drawn metadata, and a marker pixel check.",
-        "The benchmark is run with default zoom level 19, records zoomLevel=19, zoomCameraRange=300, and zoomCameraRangeCandidates for zoom 19, zoom 18, intermediate fallback, and large fallback. The 1000m intermediate fallback is retried once before the 1500m large fallback. Each successful crop records whether it passed at the requested zoom, a lower zoom, the intermediate fallback, or the large fallback. When --match-requested-zoom-extent is set and a lower zoom-level fallback succeeds, the saved crop is center-cropped and resized back to the original output size using crop_ratio = 0.6 ** (requested_zoom - final_zoom), so one zoom level lower uses the center 60% of width and height.",
+        "The benchmark is run with default zoom level 19, records zoomLevel=19, zoomCameraRange=300, and zoomCameraRangeCandidates for zoom 19, zoom 18, intermediate fallback, and large fallback. The 1000m intermediate fallback is retried once before the 1500m large fallback. Each successful crop records whether it passed at the requested zoom, a lower zoom, the intermediate fallback, or the large fallback. When --match-requested-zoom-extent is set and a fallback succeeds, the saved crop is center-cropped and resized back to the original output size: one lower zoom level uses the center 50% of width and height, two lower zoom levels use the center 25%, and 1000m/1500m recovery fallbacks use the center 30%.",
         "Each successful saved PNG contains the centered crop with an appended bottom date/status strip, and includes a top-left image-date overlay when bottom status-bar OCR parses a date; benchmark-summary.json reports dateLabelIncluded equal to the overlay count and dateLabelStripAppended equal to the appended-strip count.",
         "The final crop is taken only after a 3500ms render settle following date validation.",
         "The benchmark detects and reports Google Earth splash/blank crops instead of treating screenshot byte size as sufficient validation.",
@@ -104,6 +104,32 @@
         "batch-summary.json reports ok=3, failed=0, lowDetailDetected=0, blurredDetected=0, and minCenterSharpnessScore above the configured threshold.",
         "Each saved PNG includes the red target dot and appended visible Google Earth bottom date/status strip; top-left image-date overlay appears only when OCR parses a plausible date.",
         "The compact per-image JSON sidecars remain flat and minimal, while center-sharpness, historical-refresh, timing, camera, marker, and OCR debug details stay in batch-summary.json."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Use the google-earth-crop skill to download screenshots of \"3313 W Cypress Mill Ave, Stillwater, OK 74074\" for even-year cutoff dates from 2006-12-31 through 2026-12-31 at zoom level 19, saving results under data/stillwater. Generate any needed normalized CSV or batch input during the run; do not rely on a prepackaged Stillwater fixture. Run the full CSV batch with --match-requested-zoom-extent, wait until the batch command fully exits before analyzing outputs, then report PNG/JSON sidecar counts, the fallback step and zoomExtentCrop metadata for each fallback crop, and specifically verify that zoom-18 fallbacks use a 0.5 center-crop ratio while 1000m/1500m recovery-range fallbacks use a 0.3 center-crop ratio.",
+      "expected_output": "A generated normalized CSV or equivalent batch input with 11 address rows for 3313 W Cypress Mill Ave, Stillwater, OK 74074, using even-year query_date values 2006-12-31 through 2026-12-31 and output_name values that sort by cutoff date. The run should call scripts/crop_csv_batch.mjs or npm run crop:csv with --zoom-level 19 and --match-requested-zoom-extent, save outputs under data/stillwater, and wait for the real full batch command to finish before inspecting batch-summary.json, running jq, or evaluating images. The final output directory should contain 11 PNGs, 11 compact per-image JSON sidecars, the generated batch input, and batch-summary.json. All successful PNGs should include the red target dot, appended visible Google Earth bottom date/status strip, and a top-left image-date overlay when OCR parses a visible imagery date. batch-summary.json should report ok=11, failed=0, and expose fallback metadata. For fallback crops, zoom-18/lower-zoom entries should have zoomExtentCrop.strategy lower-zoom-center-crop-resize and cropRatio 0.5; 1000m or 1500m recovery-range entries should have zoomExtentCrop.strategy recovery-range-center-crop-resize and cropRatio 0.3. Per-image sidecars remain compact and do not include verbose retry/camera/quality metadata.",
+      "files": [
+        "SKILL.md",
+        "README.md",
+        "scripts/crop_csv_batch.mjs",
+        "scripts/google_earth_crop_core.mjs",
+        "assets/templates/normalize_csv.template.mjs"
+      ],
+      "expectations": [
+        "The eval does not add or depend on a packaged Stillwater CSV fixture; any normalized CSV or batch input is generated during the run.",
+        "The generated batch input contains exactly 11 rows for even-year cutoff dates from 2006-12-31 through 2026-12-31 inclusive.",
+        "Each row uses address 3313 W Cypress Mill Ave, Stillwater, OK 74074, a query_date in YYYY-MM-DD format, and a deterministic output_name that sorts by cutoff date.",
+        "The full batch command is run with --zoom-level 19 and --match-requested-zoom-extent, saving outputs under data/stillwater.",
+        "The agent waits until the full real CSV batch command exits before inspecting batch-summary.json, running jq over the summary, or evaluating/comparing images.",
+        "The completed batch writes 11 PNG files and 11 compact per-image JSON sidecars under data/stillwater.",
+        "batch-summary.json reports total=11, ok=11, failed=0, and records requested zoom 19 with zoomCameraRangeCandidates for 300, 600, 1000, and 1500 meter ranges.",
+        "Each saved PNG includes the red target dot and appended visible Google Earth bottom date/status strip; top-left image-date overlay appears only when OCR parses a plausible date.",
+        "Each compact per-image JSON sidecar contains only address, addressKey, dateUsed, cutoffDate, location, outputPath, zoomLevel, googleEarthQueryUrl, and imageDateOcr, plus error/status only for failed crops.",
+        "Any lower zoom-level fallback crop records zoomExtentCrop.strategy lower-zoom-center-crop-resize and zoomExtentCrop.cropRatio 0.5 in batch-summary.json.",
+        "Any 1000m or 1500m recovery-range fallback crop records zoomExtentCrop.strategy recovery-range-center-crop-resize and zoomExtentCrop.cropRatio 0.3 in batch-summary.json.",
+        "Verbose timing, retry, camera, marker, image-quality, OCR debug, and zoomExtentCrop details stay in batch-summary.json rather than per-image sidecars."
       ]
     }
   ]
