@@ -3,8 +3,8 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Use the google-earth-crop skill to run the 10-location US coordinate benchmark defined in benchmarks/us-10-coordinate-benchmark.md. From the skill directory, run node scripts/benchmark_google_earth_crop.mjs --output benchmark-runs/us-10-coordinate. The skill/script should install Playwright or Chromium automatically if unavailable. Save screenshots and benchmark-summary.json, then report the success count, failures, mean/median/min/max runtime, detail-quality results, and any observed errors.",
-      "expected_output": "A benchmark run with 10 red-dot-marked Google Earth images and a benchmark-summary.json showing selectedDate 2019-12-31 for every successful location, target camera proximity checks, marker metadata, splash/blank/low-detail rejection, per-location timing, aggregate timing, and any errors encountered.",
+      "prompt": "Use the google-earth-crop skill to run the 10-location US coordinate benchmark defined in benchmarks/us-10-coordinate-benchmark.md at the default zoom level 19. From the skill directory, run node scripts/benchmark_google_earth_crop.mjs --output benchmark-runs/us-10-coordinate. The skill/script should install Playwright or Chromium automatically if unavailable. Save screenshots and benchmark-summary.json, then report the success count, failures, zoom/range settings, date-label overlay inclusion, mean/median/min/max runtime, detail-quality results, and any observed errors.",
+      "expected_output": "A benchmark run that attempts all 10 red-dot-marked Google Earth images starting at zoom level 19, then trying zoom 18, an intermediate 1000m recovery range with one same-range retry before widening, and a final large 1500m recovery range if validation fails. Each successful PNG should include the centered crop plus an appended Google Earth bottom date/status strip, and include a top-left image-date text overlay when the strip OCR parses an imagery date. benchmark-summary.json should show zoomLevel 19, zoomCameraRange 300, zoomCameraRangeCandidates including 300/600/1000/1500, selectedDate 2019-12-31 for every successful location, requestedZoomLevel/finalZoomLevel or fallback metadata, requestedZoomLevelMatched/lowerZoomFallbackUsed/intermediateCameraFallbackUsed/largeCameraFallbackUsed counts, dateLabelIncluded equal to the count of saved crops with image-date overlays, dateLabelStripAppended equal to the count of saved crops with appended status strips, target camera proximity checks, marker metadata, splash/blank/low-detail rejection, per-location timing, aggregate timing, and any errors encountered.",
       "files": [
         "benchmarks/us-10-coordinate-benchmark.md",
         "benchmarks/baseline-2026-06-10.json",
@@ -16,15 +16,69 @@
         "The run uses exactly the 10 benchmark coordinates from benchmarks/us-10-coordinate-benchmark.md.",
         "The skill points normal crop requests to scripts/crop_google_earth.mjs and keeps shared crop logic in scripts/google_earth_crop_core.mjs.",
         "The agent attempts npm install from the skill directory and npx playwright install chromium before running the benchmark if Playwright/Chromium are not already available.",
-        "benchmark-summary.json reports total=10, ok=10, and failed=0.",
+        "benchmark-summary.json reports total=10 and accurately reports ok/failed without hiding which zoom/range finally passed.",
         "Each successful crop verifies selectedDate equals 2019-12-31 before saving the final screenshot.",
         "Each coordinate search requires URL camera proximity within 0.02 degrees of the requested lat/lon rather than relying only on movement from the previous camera.",
         "Each output PNG is a centered square crop by default and includes a red dot at the query/camera center; benchmark-summary.json records marker visibility, centered/drawn metadata, and a marker pixel check.",
-        "Each crop prefers a close neighborhood-scale camera altitude and records adaptive zoom attempts when it must fall back wider to avoid blank or low-detail imagery.",
+        "The benchmark is run with default zoom level 19, records zoomLevel=19, zoomCameraRange=300, and zoomCameraRangeCandidates for zoom 19, zoom 18, intermediate fallback, and large fallback. The 1000m intermediate fallback is retried once before the 1500m large fallback. Each successful crop records whether it passed at the requested zoom, a lower zoom, the intermediate fallback, or the large fallback.",
+        "Each successful saved PNG contains the centered crop with an appended bottom date/status strip, and includes a top-left image-date overlay when bottom status-bar OCR parses a date; benchmark-summary.json reports dateLabelIncluded equal to the overlay count and dateLabelStripAppended equal to the appended-strip count.",
         "The final crop is taken only after a 3500ms render settle following date validation.",
         "The benchmark detects and reports Google Earth splash/blank crops instead of treating screenshot byte size as sufficient validation.",
         "The benchmark detects and reports blurry low-resolution tiles using the final image detail score.",
         "The output includes per-location status, output path, selected date, search/history/screenshot timing, total runtime, and aggregate mean/median/min/max runtime."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Use the google-earth-crop skill for tiny deterministic CSV batch smoke tests using the packaged normalized fixtures. Do not depend on the workspace-root permit_sample.csv. First run scripts/crop_csv_batch.mjs with --dry-run on assets/test-data/permit-sample-10.csv and confirm it has 10 planned coordinate rows with query_date, output_name, and lat/lon. Then dry-run assets/test-data/address-sample-2.csv and confirm it has 2 planned address rows with query_date, output_name, and address. Run real --limit 1 smokes for both fixtures with outputs under benchmark-runs/csv-batch-smoke and benchmark-runs/csv-address-smoke. Report the dry-run planned row/crop counts, PNG paths, JSON sidecar paths, batch-summary.json paths, first output_name values, and whether imageDateOcr was parsed. Also state that custom source CSVs must first be normalized with assets/templates/normalize_csv.template.mjs when they do not have query_date/output_name plus lat/lon or address.",
+      "expected_output": "Batch smoke runs that use scripts/crop_csv_batch.mjs directly with assets/test-data/permit-sample-10.csv and assets/test-data/address-sample-2.csv. They should not create or run a custom /tmp crop runner, and they should not read or require the workspace-root permit_sample.csv. The coordinate dry run should validate query_date/output_name plus lat/lon, plan all 10 normalized fixture rows in input order, and produce 10 planned crops. The address dry run should validate query_date/output_name plus address, plan both address fixture rows in input order, and produce 2 planned crops. The real smokes may use --limit 1 and should create one crop for each fixture under benchmark-runs/csv-batch-smoke and benchmark-runs/csv-address-smoke, each with a PNG named from the row's output_name, an adjacent compact JSON sidecar, and batch-summary.json. They should not save batch smoke results under /tmp. Filenames should use output_name as the complete PNG basename, without appending phase, OCR imagery date, or query_date. The saved crop should include an appended bottom date/status strip so users can inspect the visible Google Earth date if OCR fails; it may include a top-left image-date overlay only when OCR parses the visible Google Earth status-bar date. batch-summary.json may retain detailed diagnostics, but each per-image JSON sidecar stays flat and minimal. The response should mention assets/templates/normalize_csv.template.mjs only as the way to convert nonconforming source CSVs into the deterministic query_date/output_name plus location-source format.",
+      "files": [
+        "SKILL.md",
+        "references/csv-batch-template.md",
+        "scripts/crop_csv_batch.mjs",
+        "scripts/google_earth_crop_core.mjs",
+        "assets/templates/normalize_csv.template.mjs",
+        "assets/test-data/permit-sample-10.csv",
+        "assets/test-data/address-sample-2.csv"
+      ],
+      "expectations": [
+        "The agent runs scripts/crop_csv_batch.mjs for the batch smoke and does not create a custom /tmp crop runner.",
+        "The coordinate fixture uses the deterministic normalized schema with query_date, output_name, lat, and lon columns.",
+        "The address fixture uses the deterministic normalized schema with query_date, output_name, and address columns.",
+        "The run uses packaged test-data fixtures and does not depend on the workspace-root permit_sample.csv.",
+        "The coordinate dry run plans all 10 normalized fixture rows and 10 crops in input order.",
+        "The address dry run plans both normalized fixture rows and 2 crops in input order.",
+        "The real --limit 1 smokes write PNGs, compact JSON sidecars, and batch-summary.json files under benchmark-runs rather than /tmp.",
+        "The deterministic runner uses output_name as the final PNG basename and does not append OCR dates, query dates, output_key, or phase.",
+        "The deterministic runner uses lat/lon coordinates or address search as the Google Earth location and preserves optional address/address_key metadata when present.",
+        "Nonconforming source CSVs are handled by generating a normalized CSV with assets/templates/normalize_csv.template.mjs before running scripts/crop_csv_batch.mjs.",
+        "Each PNG is saved with the visible Google Earth bottom date/status strip appended below the crop.",
+        "Each PNG includes a top-left image-date overlay only when the Google Earth bottom status-bar OCR returns a plausible imagery date.",
+        "Each per-image JSON sidecar contains only address, addressKey, dateUsed, cutoffDate, location, outputPath, zoomLevel, googleEarthQueryUrl, and imageDateOcr, plus error only for failed crops.",
+        "Verbose timing, retry, camera, marker, image-quality, OCR debug, and validation details stay in batch-summary.json rather than per-image sidecars."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Use the google-earth-crop skill to run the packaged Moorpark date OCR regression. From the skill directory, run node scripts/crop_csv_batch.mjs --csv assets/test-data/moorpark-date-ocr.csv --output benchmark-runs/moorpark-date-ocr --missing-ocr-retries 0. The fixture contains address W 12801 MOORPARK, CA 91604 with query_date 2014-12-18 and output_name W_12801_MOORPARK_ST_CA_000_143400_before. Report the PNG path, compact JSON sidecar path, selected timeline date, parsed imageDateOcr, whether the appended strip was saved, whether a top-left overlay was included, and any OCR errors.",
+      "expected_output": "A one-row deterministic CSV batch run using assets/test-data/moorpark-date-ocr.csv, not a custom /tmp runner. It should create benchmark-runs/moorpark-date-ocr/W_12801_MOORPARK_ST_CA_000_143400_before.png, the adjacent compact JSON sidecar, and batch-summary.json. The crop should select timeline date 2014-12-17 for cutoff 2014-12-18. The visible bottom status strip should be appended to the PNG, OCR should parse the visible imagery date as 2014-04-24, and the overlay text should be exactly Image date: 2014-04-24 without older/newer qualifiers. The sidecar imageDateOcr should be exactly 2014-04-24. batch-summary.json may retain raw OCR debug text such as older-4/24/2014 or OCR misspellings, but parsed/stored OCR result fields and overlay text should contain only the actual ISO date.",
+      "files": [
+        "SKILL.md",
+        "README.md",
+        "scripts/crop_csv_batch.mjs",
+        "scripts/google_earth_crop_core.mjs",
+        "scripts/ocr_date_label.mjs",
+        "assets/test-data/moorpark-date-ocr.csv"
+      ],
+      "expectations": [
+        "The eval uses packaged fixture assets/test-data/moorpark-date-ocr.csv and does not depend on workspace-root permit_sample.csv or a generated /tmp crop runner.",
+        "The fixture row has address W 12801 MOORPARK, CA 91604, query_date 2014-12-18, output_name W_12801_MOORPARK_ST_CA_000_143400_before, and address_key W_12801_MOORPARK_ST_CA_000_143400.",
+        "The crop verifies selectedDate equals 2014-12-17 before saving output.",
+        "The saved PNG includes the centered crop, red target dot, and appended visible Google Earth bottom date/status strip.",
+        "The top-left overlay text is Image date: 2014-04-24 and does not include older, newer, newest, or latest.",
+        "The compact per-image JSON sidecar includes imageDateOcr exactly equal to 2014-04-24 and does not store an OCR qualifier.",
+        "The batch summary reports dateLabelIncluded=1, dateLabelStripAppended=1, imageryDateExtracted=1, ok=1, and failed=0.",
+        "Raw OCR debug text in batch-summary.json may include the visible Google Earth qualifier or OCR misspellings, but parsed OCR fields and user-facing overlay/sidecar values contain only the actual ISO date."
       ]
     }
   ]

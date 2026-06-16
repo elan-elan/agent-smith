@@ -8,10 +8,11 @@ Purpose: verify that the `google-earth-crop` skill is fast without accepting sta
 - `targetDate`: `2019-12-31`
 - viewport: `1600x1200`
 - clip: centered square `{ x: 410, y: 210, width: 780, height: 780 }`
-- preferred camera altitude: `500m`, with fallback through `700`, `1000`, `1500`, `2000`, `2500`, then the original search altitude
+- zoom level: start at default `19`, mapping to camera altitude/range `300m`; if validation fails, try zoom 18 (`600m`), intermediate recovery (`1000m`) with one same-range retry, then large recovery (`1500m`)
 - render settle: `3500ms` after selected-date validation
 - minimum detail score: `50`
 - red location marker: enabled by default, radius `7px`
+- visible Google Earth date/status label: enabled by default by appending the bottom status-bar strip below each crop, OCRing that strip, and overlaying the parsed image date at the top left when OCR succeeds
 
 ## Fixed Random US Coordinates
 
@@ -36,6 +37,8 @@ npx playwright install chromium
 node scripts/benchmark_google_earth_crop.mjs --output benchmark-runs/us-10-coordinate
 ```
 
+The benchmark records every zoom attempt. For the default zoom level `19`, the allowed final ranges are `300m`, `600m`, `1000m`, and then `1500m` as the final large recovery fallback. At `1000m`, the crop retries the same range once before widening to `1500m`. Add `--strict-zoom` only when the requested zoom itself must pass with no lower-zoom fallback.
+
 Shortcut: `npm run eval:full`. The script also attempts `npm install` when the Playwright package is missing, and `npx playwright install chromium` when the browser binary is missing. It writes `benchmark-summary.json` and 10 crop PNGs to the output directory.
 
 The benchmark runner calls the shared implementation in `scripts/google_earth_crop_core.mjs`; regular crop requests should use `scripts/crop_google_earth.mjs` or `npm run crop -- --location "LOCATION" --output path/to/crop.png`.
@@ -47,10 +50,12 @@ The benchmark runs headless by default. Add `--headed` only when debugging rende
 - `total` is `10`, `ok` is `10`, and `failed` is `0`.
 - Every result has `selectedDate: "2019-12-31"`.
 - Every result has `targetDelta <= 0.02`.
-- Every result records the requested camera altitude and any adaptive zoom attempts.
+- Every successful result records `zoomLevel: 19`, `zoomCameraRange: 300`, the ordered `zoomCameraRangeCandidates`, `requestedZoomLevel` or `zoomFallbackStep`, and the final camera range that passed validation.
+- The summary reports how many crops matched the requested zoom, used a lower zoom fallback, or used the large camera fallback.
 - Every result records a visible, centered, pixel-verified red location marker.
+- Every output PNG contains the centered crop plus an appended bottom date/status strip, and includes a top-left image-date overlay when bottom status-bar OCR parses a date; the summary reports `dateLabelIncluded` as the overlay count and `dateLabelStripAppended` as the appended-strip count.
 - Every final image analysis has `splash: false`, `blank: false`, and `lowDetail: false`.
-- The summary includes `total`, `meanMs`, `medianMs`, `minMs`, `maxMs`, `markerVisible`, `markerDrawn`, `markerCentered`, and per-location timings.
+- The summary includes `total`, `meanMs`, `medianMs`, `minMs`, `maxMs`, `markerVisible`, `markerDrawn`, `markerCentered`, `dateLabelIncluded`, `dateLabelStripAppended`, and per-location timings.
 - Investigate if mean runtime rises above `23000ms` on a normal local connection; square marked outputs include more pixels, canvas overlay, and marker-pixel verification overhead.
 
 ## Failure Modes To Catch
@@ -70,4 +75,4 @@ With target-camera readiness and `3500ms` render settle: `10/10` valid crops, me
 
 Earlier `500ms` crops were faster but invalid: they accepted stale Las Vegas coordinates for Dallas/Fargo and saved Google Earth splash screenshots.
 
-With adaptive neighborhood zoom plus centered square crop and red marker overlay/pixel verification: `10/10` valid crops, `markerDrawn: 10`, `markerCentered: 10`, mean about `19554ms`, median about `19788ms`, min about `13887ms`, max about `36159ms`.
+With adaptive neighborhood zoom plus centered square crop and red marker overlay/pixel verification: `10/10` valid crops, `markerDrawn: 10`, `markerCentered: 10`, mean about `19554ms`, median about `19788ms`, min about `13887ms`, max about `36159ms`. Current evals use default zoom level `19` and overlay the parsed visible Google Earth date label at top left, so runtime may differ from this older baseline.
