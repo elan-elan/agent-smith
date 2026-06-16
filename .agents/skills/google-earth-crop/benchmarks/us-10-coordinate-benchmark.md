@@ -12,7 +12,7 @@ Purpose: verify that the `google-earth-crop` skill is fast without accepting sta
 - render settle: `3500ms` after selected-date validation
 - minimum detail score: `50`
 - red location marker: enabled by default, radius `7px`
-- visible Google Earth date/status label: enabled by default by OCRing the bottom status-bar strip and overlaying the parsed image date at the top left of each saved PNG
+- visible Google Earth date/status label: enabled by default by appending the bottom status-bar strip below each crop, OCRing that strip, and overlaying the parsed image date at the top left when OCR succeeds
 
 ## Fixed Random US Coordinates
 
@@ -53,9 +53,9 @@ The benchmark runs headless by default. Add `--headed` only when debugging rende
 - Every successful result records `zoomLevel: 19`, `zoomCameraRange: 300`, the ordered `zoomCameraRangeCandidates`, `requestedZoomLevel` or `zoomFallbackStep`, and the final camera range that passed validation.
 - The summary reports how many crops matched the requested zoom, used a lower zoom fallback, or used the large camera fallback.
 - Every result records a visible, centered, pixel-verified red location marker.
-- Every output PNG remains at the centered crop size and includes a top-left image-date overlay when bottom status-bar OCR parses a date; the summary reports `dateLabelIncluded` as the overlay count.
+- Every output PNG contains the centered crop plus an appended bottom date/status strip, and includes a top-left image-date overlay when bottom status-bar OCR parses a date; the summary reports `dateLabelIncluded` as the overlay count and `dateLabelStripAppended` as the appended-strip count.
 - Every final image analysis has `splash: false`, `blank: false`, and `lowDetail: false`.
-- The summary includes `total`, `meanMs`, `medianMs`, `minMs`, `maxMs`, `markerVisible`, `markerDrawn`, `markerCentered`, `dateLabelIncluded`, and per-location timings.
+- The summary includes `total`, `meanMs`, `medianMs`, `minMs`, `maxMs`, `markerVisible`, `markerDrawn`, `markerCentered`, `dateLabelIncluded`, `dateLabelStripAppended`, and per-location timings.
 - Investigate if mean runtime rises above `23000ms` on a normal local connection; square marked outputs include more pixels, canvas overlay, and marker-pixel verification overhead.
 
 ## Failure Modes To Catch

@@ -177,8 +177,8 @@ Options:
   --max-camera-altitude        Legacy alias for --preferred-camera-altitude.
   --marker-radius        Red location marker radius in pixels. Default: ${DEFAULT_MARKER_RADIUS}
   --no-marker            Save the crop without the red location marker.
-  --no-date-label        Do not OCR the visible Google Earth imagery date/status strip or overlay the parsed image date. Default: ${DEFAULT_INCLUDE_DATE_LABEL ? 'OCR and overlay date' : 'skip date label'}.
-  --no-date-ocr          Do not OCR the date/status strip, which also disables the image-date text overlay. Default: ${DEFAULT_EXTRACT_IMAGERY_DATE ? 'OCR strip' : 'skip OCR'}.
+  --no-date-label        Do not capture, append, OCR, or overlay the visible Google Earth imagery date/status strip. Default: ${DEFAULT_INCLUDE_DATE_LABEL ? 'append strip, OCR, and overlay date when parsed' : 'skip date label'}.
+  --no-date-ocr          Append the date/status strip but skip OCR, which also disables the image-date text overlay. Default: ${DEFAULT_EXTRACT_IMAGERY_DATE ? 'OCR strip' : 'skip OCR'}.
   --date-ocr-retries     Retry bottom-strip screenshot+OCR when no date is parsed. Default: ${DEFAULT_IMAGERY_DATE_OCR_RETRIES}
   --date-ocr-retry-wait-ms  Wait between OCR retry screenshots. Default: ${DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS}
   --headed               Show Chromium for debugging.

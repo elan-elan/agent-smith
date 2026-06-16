@@ -49,10 +49,10 @@ function positionalInput() {
 }
 
 function printUsage() {
-  console.error(`Usage: node scripts/ocr_date_label.mjs --input path/to/legacy-appended-strip-crop.png [--json path/to/crop.json]
+  console.error(`Usage: node scripts/ocr_date_label.mjs --input path/to/crop-with-appended-strip.png [--json path/to/crop.json]
 
 Options:
-  --input, --image       Legacy crop PNG with appended Google Earth bottom date strip. New crops OCR the strip before saving and overlay the parsed image date at top left instead.
+  --input, --image       Crop PNG with appended Google Earth bottom date/status strip.
   --json                 Optional sidecar JSON to update with imageDateOcr.
   --strip-height         Appended strip height in pixels. Default: 42.
   --dry-run              Print OCR result without updating JSON.

@@ -31,7 +31,7 @@ Each crop writes:
 ```
 
 The JSON sidecar is intentionally small and flat: `address`, `addressKey`, `dateUsed`, `cutoffDate`, `location`, `outputPath`, `zoomLevel`, `googleEarthQueryUrl`, and `imageDateOcr`.
-The PNG includes a centered red dot at the queried location by default and overlays `Image date: ...` at top left when OCR finds a visible Google Earth image date.
+The PNG includes a centered red dot at the queried location by default, appends the visible Google Earth bottom date/status strip below the crop for manual inspection, and overlays `Image date: ...` at top left when OCR finds a visible Google Earth image date.
 
 ## Setup Notes
 

@@ -252,15 +252,29 @@ export async function cropGoogleEarth(page, options) {
             if (extractImageryDate) dateLabel.ocr = capture.ocr;
             const overlayText = imageDateOverlayText(dateLabel.ocr);
             if (overlayText) {
-              const labeled = await overlayImageDateText(page, output, overlayText);
-              output = labeled.image;
-              dateLabel.included = true;
-              dateLabel.position = 'overlay-top-left';
-              dateLabel.overlay = labeled.overlay;
+              try {
+                const labeled = await overlayImageDateText(page, output, overlayText);
+                output = labeled.image;
+                dateLabel.included = true;
+                dateLabel.position = 'overlay-top-left';
+                dateLabel.overlay = labeled.overlay;
+              } catch (error) {
+                dateLabel.included = false;
+                dateLabel.position = null;
+                dateLabel.overlay = null;
+                dateLabel.overlayError = String(error.message || error).slice(0, 200);
+              }
             } else {
               dateLabel.included = false;
               dateLabel.position = null;
               dateLabel.overlay = null;
+            }
+            if (capture.strip) {
+              const appended = appendPngBottomStrip(output, capture.strip);
+              output = appended.image;
+              dateLabel.stripAppended = true;
+              dateLabel.stripPosition = 'appended-bottom';
+              dateLabel.strip = appended.strip;
             }
           } catch (error) {
             dateLabel.included = false;
@@ -320,6 +334,7 @@ export function buildSummary(results) {
     markerDrawn: results.filter((result) => result.marker?.drawn).length,
     markerCentered: results.filter((result) => result.marker?.centered).length,
     dateLabelIncluded: results.filter((result) => result.dateLabel?.included).length,
+    dateLabelStripAppended: results.filter((result) => result.dateLabel?.stripAppended).length,
     imageryDateExtracted: results.filter((result) => result.dateLabel?.ocr?.imageryDate).length,
     strictCameraAltitudeRequired: strictCameraAltitudeResults.length,
     strictCameraAltitudeMatched: strictCameraAltitudeOk.filter((result) => Math.abs((result.finalCamera?.range ?? Infinity) - result.preferredCameraAltitude) < 1e-6).length,
@@ -674,6 +689,43 @@ function cropPngStrip(image, rectangle) {
     data.copy(pixels, yPosition * cropWidth * 4, sourceStart, sourceEnd);
   }
   return encodeRgbaPng(cropWidth, cropHeight, pixels);
+}
+
+function appendPngBottomStrip(imagePng, stripPng) {
+  const image = decodePngRgba(imagePng);
+  const strip = decodePngRgba(stripPng);
+  const outputWidth = image.width;
+  const outputHeight = image.height + strip.height;
+  const stripCopyWidth = Math.min(outputWidth, strip.width);
+  const pixels = Buffer.alloc(outputWidth * outputHeight * 4);
+  for (let offset = 3; offset < pixels.length; offset += 4) pixels[offset] = 255;
+
+  for (let yPosition = 0; yPosition < image.height; yPosition += 1) {
+    const sourceStart = yPosition * image.width * 4;
+    const sourceEnd = sourceStart + image.width * 4;
+    const targetStart = yPosition * outputWidth * 4;
+    image.data.copy(pixels, targetStart, sourceStart, sourceEnd);
+  }
+
+  for (let yPosition = 0; yPosition < strip.height; yPosition += 1) {
+    const sourceStart = yPosition * strip.width * 4;
+    const sourceEnd = sourceStart + stripCopyWidth * 4;
+    const targetStart = (image.height + yPosition) * outputWidth * 4;
+    strip.data.copy(pixels, targetStart, sourceStart, sourceEnd);
+  }
+
+  return {
+    image: encodeRgbaPng(outputWidth, outputHeight, pixels),
+    strip: {
+      source: 'google-earth-visible-bottom-status-bar',
+      position: 'appended-bottom',
+      width: outputWidth,
+      height: strip.height,
+      sourceWidth: strip.width,
+      sourceHeight: strip.height,
+      copiedWidth: stripCopyWidth
+    }
+  };
 }
 
 function pngDimensions(png) {
