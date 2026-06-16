@@ -49,6 +49,7 @@ const extractImageryDate = includeDateLabel && !optionFlag('no-date-ocr') && DEF
 const imageryDateOcrRetries = Number(optionValue('date-ocr-retries') ?? DEFAULT_IMAGERY_DATE_OCR_RETRIES);
 const imageryDateOcrRetryWaitMs = Number(optionValue('date-ocr-retry-wait-ms') ?? DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS);
 const strictCameraAltitude = Boolean(zoomLevel) && optionFlag('strict-zoom');
+const matchRequestedZoomExtent = optionFlag('match-requested-zoom-extent');
 const viewport = DEFAULT_VIEWPORT;
 const clip = parseClip(optionValue('clip'));
 const benchmarkLocations = [
@@ -98,6 +99,7 @@ try {
       imageryDateOcrRetries,
       imageryDateOcrRetryWaitMs,
       strictCameraAltitude,
+      matchRequestedZoomExtent,
       clip,
       previousCamera: lastConfirmedCamera,
       index: location.index,
@@ -134,6 +136,7 @@ const report = {
   imageryDateOcrRetries,
   imageryDateOcrRetryWaitMs,
   strictCameraAltitude,
+  matchRequestedZoomExtent,
   viewport,
   clip,
   locations: locations.map((location) => location.query),

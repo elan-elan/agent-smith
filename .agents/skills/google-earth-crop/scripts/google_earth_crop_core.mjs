@@ -16,7 +16,7 @@ export const DEFAULT_ZOOM_LEVEL = 19;
 export const DEFAULT_ROOF_ZOOM_LEVEL = 21;
 export const DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE = 1000;
 export const DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE = 1500;
-export const DEFAULT_MARKER_RADIUS = 7;
+export const DEFAULT_MARKER_RADIUS = 4;
 export const DEFAULT_INCLUDE_DATE_LABEL = true;
 export const DEFAULT_EXTRACT_IMAGERY_DATE = true;
 export const DEFAULT_IMAGERY_DATE_OCR_RETRIES = 2;
@@ -27,6 +27,7 @@ const ROOF_ZOOM_LEVEL_RANGE_METERS = 75;
 const HISTORICAL_TILE_REFRESH_OLDER = { x: 300, y: 120 };
 const HISTORICAL_TILE_REFRESH_NEWER = { x: 420, y: 120 };
 const CENTER_SHARPNESS_CROP_RATIO = 0.55;
+const LOWER_ZOOM_EXTENT_CROP_RATIO = 0.6;
 let imageryDateOcrWorkerPromise = null;
 
 export function optionValue(name, args = process.argv) {
@@ -102,6 +103,7 @@ export async function cropGoogleEarth(page, options) {
     imageryDateOcrRetries = DEFAULT_IMAGERY_DATE_OCR_RETRIES,
     imageryDateOcrRetryWaitMs = DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS,
     strictCameraAltitude = false,
+    matchRequestedZoomExtent = false,
     clip = DEFAULT_CLIP,
     viewport = DEFAULT_VIEWPORT,
     previousCamera = null,
@@ -162,6 +164,7 @@ export async function cropGoogleEarth(page, options) {
       fallbackStep: candidate.fallbackStep
     }));
     record.strictCameraAltitude = strictCameraAltitude;
+    record.matchRequestedZoomExtent = matchRequestedZoomExtent;
     record.cameraAltitudeCandidates = altitudeCandidates;
     record.zoomAttempts = [];
 
@@ -268,15 +271,24 @@ export async function cropGoogleEarth(page, options) {
         if (attempt.analysis.lowDetail) throw new Error(`final crop is low detail: detailScore ${attempt.analysis.detailScore.toFixed(2)} < ${minDetailScore}`);
         if (attempt.analysis.blurred) throw new Error(`final crop is center blurred: centerSharpnessScore ${attempt.analysis.centerSharpnessScore.toFixed(2)} < ${minCenterSharpnessScore}`);
 
-        const marker = locationMarkerForClip(clip, viewport, { enabled: markLocation, radius: markerRadius });
         let output = screenshot;
+        if (matchRequestedZoomExtent) {
+          const zoomExtentCrop = await cropLowerZoomFallbackToRequestedExtent(page, output, {
+            requestedZoomLevel,
+            finalZoomLevel: attempt.finalZoomLevel
+          });
+          if (zoomExtentCrop.applied) {
+            output = zoomExtentCrop.image;
+            attempt.zoomExtentCrop = zoomExtentCrop.metadata;
+          }
+        }
+
+        const marker = locationMarkerForClip(clip, viewport, { enabled: markLocation, radius: markerRadius });
         if (marker.enabled && marker.visible) {
           const overlayStart = Date.now();
-          const marked = await screenshotWithLocationMarker(page, marker, clip, viewport);
-          output = marked.screenshot;
-          recordTransientUiDismissal(attempt, marked.transientUi);
+          const marked = await overlayLocationMarker(page, output, marker);
+          output = marked.image;
           marker.overlayMs = Date.now() - overlayStart;
-          marker.sampleClip = marked.sampleClip;
           marker.pixelCheck = marked.pixelCheck;
           marker.drawn = marker.pixelCheck.redPixels >= marker.pixelCheck.minRedPixels;
           if (!marker.drawn) throw new Error(`location marker overlay not detected: ${marker.pixelCheck.redPixels} red pixels`);
@@ -387,6 +399,7 @@ export function buildSummary(results) {
     lowerZoomFallbackUsed: zoomLevelOk.filter((result) => Number.isFinite(result.finalZoomLevel) && result.finalZoomLevel < result.zoomLevel).length,
     intermediateCameraFallbackUsed: zoomLevelOk.filter((result) => result.zoomFallbackStep === 'intermediate-fallback').length,
     largeCameraFallbackUsed: zoomLevelOk.filter((result) => result.zoomFallbackStep === 'large-fallback').length,
+    zoomExtentCropped: ok.filter((result) => result.zoomExtentCrop?.applied).length,
     retries: results.filter((result) => result.retried).length
   };
 }
@@ -1199,41 +1212,91 @@ async function overlayImageDateText(page, imagePng, text) {
   };
 }
 
-async function screenshotWithLocationMarker(page, marker, clip, viewport) {
-  const markerId = '__google_earth_crop_marker__';
-  const absoluteX = clip.x + marker.x;
-  const absoluteY = clip.y + marker.y;
-  await page.evaluate(async ({ marker, markerId, absoluteX, absoluteY }) => {
-    document.getElementById(markerId)?.remove();
-    const element = document.createElement('div');
-    element.id = markerId;
-    Object.assign(element.style, {
-      position: 'fixed',
-      left: `${absoluteX}px`,
-      top: `${absoluteY}px`,
-      width: `${(marker.radius + marker.strokeWidth) * 2}px`,
-      height: `${(marker.radius + marker.strokeWidth) * 2}px`,
-      transform: 'translate(-50%, -50%)',
-      borderRadius: '9999px',
-      border: `${marker.strokeWidth}px solid ${marker.stroke}`,
-      background: marker.fill,
-      boxSizing: 'border-box',
-      boxShadow: '0 0 3px rgba(0, 0, 0, 0.65)',
-      pointerEvents: 'none',
-      zIndex: '2147483647'
-    });
-    document.documentElement.appendChild(element);
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-  }, { marker, markerId, absoluteX, absoluteY });
-
-  try {
-    const cleanShot = await screenshotWithoutTransientUi(page, clip);
-    const screenshot = cleanShot.screenshot;
-    const pixelCheck = analyzeMarkerPixels(screenshot, marker);
-    return { screenshot, pixelCheck, transientUi: cleanShot.transientUi };
-  } finally {
-    await page.evaluate((markerId) => document.getElementById(markerId)?.remove(), markerId).catch(() => {});
+async function cropLowerZoomFallbackToRequestedExtent(page, imagePng, { requestedZoomLevel, finalZoomLevel }) {
+  const zoomDelta = requestedZoomLevel - finalZoomLevel;
+  if (!Number.isFinite(requestedZoomLevel) || !Number.isFinite(finalZoomLevel) || !Number.isFinite(zoomDelta) || zoomDelta <= 0) {
+    return { applied: false, image: imagePng };
   }
+
+  const cropRatio = Math.max(0.01, Math.min(1, LOWER_ZOOM_EXTENT_CROP_RATIO ** zoomDelta));
+  const imageDataUrl = `data:image/png;base64,${imagePng.toString('base64')}`;
+  const result = await page.evaluate(async ({ imageDataUrl, cropRatio }) => {
+    const loadImage = (source) => new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Unable to load PNG for zoom-extent crop'));
+      image.src = source;
+    });
+    const image = await loadImage(imageDataUrl);
+    const outputWidth = image.naturalWidth;
+    const outputHeight = image.naturalHeight;
+    const cropWidth = Math.max(1, Math.round(outputWidth * cropRatio));
+    const cropHeight = Math.max(1, Math.round(outputHeight * cropRatio));
+    const cropX = Math.floor((outputWidth - cropWidth) / 2);
+    const cropY = Math.floor((outputHeight - cropHeight) / 2);
+    const canvas = document.createElement('canvas');
+    canvas.width = outputWidth;
+    canvas.height = outputHeight;
+    const context = canvas.getContext('2d');
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, outputWidth, outputHeight);
+    return {
+      base64: canvas.toDataURL('image/png').split(',')[1],
+      sourceCrop: { x: cropX, y: cropY, width: cropWidth, height: cropHeight },
+      outputSize: { width: outputWidth, height: outputHeight }
+    };
+  }, { imageDataUrl, cropRatio });
+
+  return {
+    applied: true,
+    image: Buffer.from(result.base64, 'base64'),
+    metadata: {
+      applied: true,
+      strategy: 'lower-zoom-center-crop-resize',
+      requestedZoomLevel,
+      finalZoomLevel,
+      zoomDelta,
+      cropRatio: Number(cropRatio.toFixed(6)),
+      sourceCrop: result.sourceCrop,
+      outputSize: result.outputSize
+    }
+  };
+}
+
+async function overlayLocationMarker(page, imagePng, marker) {
+  const imageDataUrl = `data:image/png;base64,${imagePng.toString('base64')}`;
+  const result = await page.evaluate(async ({ imageDataUrl, marker }) => {
+    const loadImage = (source) => new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Unable to load PNG for marker overlay'));
+      image.src = source;
+    });
+    const image = await loadImage(imageDataUrl);
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext('2d');
+    context.drawImage(image, 0, 0);
+
+    context.save();
+    context.shadowColor = 'rgba(0, 0, 0, 0.65)';
+    context.shadowBlur = 3;
+    context.beginPath();
+    context.arc(marker.x, marker.y, marker.radius, 0, Math.PI * 2);
+    context.fillStyle = marker.fill;
+    context.fill();
+    context.shadowBlur = 0;
+    context.lineWidth = marker.strokeWidth;
+    context.strokeStyle = marker.stroke;
+    context.stroke();
+    context.restore();
+
+    return { base64: canvas.toDataURL('image/png').split(',')[1] };
+  }, { imageDataUrl, marker });
+  const image = Buffer.from(result.base64, 'base64');
+  return { image, pixelCheck: analyzeMarkerPixels(image, marker) };
 }
 
 function analyzeMarkerPixels(screenshot, marker) {
@@ -1291,6 +1354,7 @@ function copyAttemptToRecord(record, attempt) {
   record.analysis = attempt.analysis;
   record.marker = attempt.marker;
   record.dateLabel = attempt.dateLabel;
+  record.zoomExtentCrop = attempt.zoomExtentCrop ?? null;
   record.transientUiDismissals = attempt.transientUiDismissals;
   record.retried = attempt.retried;
   if (attempt.retryMs) record.retryMs = attempt.retryMs;

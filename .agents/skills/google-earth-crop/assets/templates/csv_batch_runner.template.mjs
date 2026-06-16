@@ -57,6 +57,7 @@ const includeDateLabel = !cliFlag('no-date-label');
 const extractImageryDate = includeDateLabel && !cliFlag('no-date-ocr') && DEFAULT_EXTRACT_IMAGERY_DATE;
 const imageryDateOcrRetries = Number(cliOptionValue('date-ocr-retries') ?? DEFAULT_IMAGERY_DATE_OCR_RETRIES);
 const imageryDateOcrRetryWaitMs = Number(cliOptionValue('date-ocr-retry-wait-ms') ?? DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS);
+const matchRequestedZoomExtent = cliFlag('match-requested-zoom-extent');
 const viewport = DEFAULT_VIEWPORT;
 const clip = parseClip(cliOptionValue('clip'));
 
@@ -140,6 +141,7 @@ try {
         extractImageryDate,
         imageryDateOcrRetries,
         imageryDateOcrRetryWaitMs,
+        matchRequestedZoomExtent,
         clip,
         previousCamera: lastConfirmedCamera,
         index: perCrop.length + 1,
@@ -197,6 +199,7 @@ const batchReport = {
   extractImageryDate,
   imageryDateOcrRetries,
   imageryDateOcrRetryWaitMs,
+  matchRequestedZoomExtent,
   viewport,
   clip,
   results: summary,

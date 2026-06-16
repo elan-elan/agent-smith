@@ -52,6 +52,7 @@ const includeDateLabel = !optionFlag('no-date-label');
 const extractImageryDate = includeDateLabel && !optionFlag('no-date-ocr') && DEFAULT_EXTRACT_IMAGERY_DATE;
 const imageryDateOcrRetries = Number(optionValue('date-ocr-retries') ?? DEFAULT_IMAGERY_DATE_OCR_RETRIES);
 const imageryDateOcrRetryWaitMs = Number(optionValue('date-ocr-retry-wait-ms') ?? DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS);
+const matchRequestedZoomExtent = optionFlag('match-requested-zoom-extent');
 const clip = parseClip(optionValue('clip'));
 
 if (!location || optionFlag('help')) {
@@ -85,6 +86,7 @@ try {
     extractImageryDate,
     imageryDateOcrRetries,
     imageryDateOcrRetryWaitMs,
+    matchRequestedZoomExtent,
     clip
   });
 
@@ -107,6 +109,7 @@ try {
     extractImageryDate,
     imageryDateOcrRetries,
     imageryDateOcrRetryWaitMs,
+    matchRequestedZoomExtent,
     viewport: DEFAULT_VIEWPORT,
     clip,
     result
@@ -186,6 +189,7 @@ Options:
   --no-date-ocr          Append the date/status strip but skip OCR, which also disables the image-date text overlay. Default: ${DEFAULT_EXTRACT_IMAGERY_DATE ? 'OCR strip' : 'skip OCR'}.
   --date-ocr-retries     Retry bottom-strip screenshot+OCR when no date is parsed. Default: ${DEFAULT_IMAGERY_DATE_OCR_RETRIES}
   --date-ocr-retry-wait-ms  Wait between OCR retry screenshots. Default: ${DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS}
+  --match-requested-zoom-extent  If a lower zoom-level fallback succeeds, center-crop it to match the requested zoom extent and resize back before overlays.
   --headed               Show Chromium for debugging.
 `);
 }

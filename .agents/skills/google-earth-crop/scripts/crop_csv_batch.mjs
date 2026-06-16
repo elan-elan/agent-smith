@@ -51,6 +51,7 @@ const includeDateLabel = !cliFlag('no-date-label');
 const extractImageryDate = includeDateLabel && !cliFlag('no-date-ocr') && DEFAULT_EXTRACT_IMAGERY_DATE;
 const imageryDateOcrRetries = Number(cliOptionValue('date-ocr-retries') ?? DEFAULT_IMAGERY_DATE_OCR_RETRIES);
 const imageryDateOcrRetryWaitMs = Number(cliOptionValue('date-ocr-retry-wait-ms') ?? DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS);
+const matchRequestedZoomExtent = cliFlag('match-requested-zoom-extent');
 const viewport = DEFAULT_VIEWPORT;
 const clip = parseClip(cliOptionValue('clip'));
 
@@ -89,6 +90,7 @@ if (cliFlag('dry-run')) {
     requiredColumns: COMMON_REQUIRED_COLUMNS,
     locationColumnSets: [COORDINATE_LOCATION_COLUMNS, ['address']],
     rowLimit,
+    matchRequestedZoomExtent,
     parsedRows: rawRows.length,
     rowsToProcess: plannedRows.length,
     plannedCropCount,
@@ -142,6 +144,7 @@ try {
       extractImageryDate,
       imageryDateOcrRetries,
       imageryDateOcrRetryWaitMs,
+      matchRequestedZoomExtent,
       clip,
       previousCamera: previousCameraForReadiness,
       index: rowIndex + 1,
@@ -209,6 +212,7 @@ const batchReport = {
   missingOcrRetryMode,
   imageryDateOcrRetries,
   imageryDateOcrRetryWaitMs,
+  matchRequestedZoomExtent,
   viewport,
   clip,
   results: summary,
@@ -502,6 +506,7 @@ Options:
   --missing-ocr-retries  Retry successful crops that did not parse an imagery date. Default: 1
   --missing-ocr-retry-mode  How missing-OCR retries reset state: fresh-context or same-page. Default: fresh-context
   --min-center-sharpness-score  Center-crop blur rejection threshold. Default: ${DEFAULT_MIN_CENTER_SHARPNESS_SCORE}
+  --match-requested-zoom-extent  If a lower zoom-level fallback succeeds, center-crop it to match the requested zoom extent and resize back before overlays.
   --dry-run              Print planned rows without opening Google Earth
   --headed               Show Chromium for debugging
 
