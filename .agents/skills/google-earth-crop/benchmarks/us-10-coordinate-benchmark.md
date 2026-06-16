@@ -75,4 +75,4 @@ With target-camera readiness and `3500ms` render settle: `10/10` valid crops, me
 
 Earlier `500ms` crops were faster but invalid: they accepted stale Las Vegas coordinates for Dallas/Fargo and saved Google Earth splash screenshots.
 
-With adaptive neighborhood zoom plus centered square crop and red marker overlay/pixel verification: `10/10` valid crops, `markerDrawn: 10`, `markerCentered: 10`, mean about `19554ms`, median about `19788ms`, min about `13887ms`, max about `36159ms`. Current evals use default zoom level `19` and overlay the parsed visible Google Earth image date at top left, so runtime may differ from this older baseline.
+With adaptive neighborhood zoom plus centered square crop and red marker overlay/pixel verification: `10/10` valid crops, `markerDrawn: 10`, `markerCentered: 10`, mean about `19554ms`, median about `19788ms`, min about `13887ms`, max about `36159ms`. Current evals use default zoom level `19` and overlay the parsed visible Google Earth date label at top left, so runtime may differ from this older baseline.
