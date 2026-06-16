@@ -25,39 +25,26 @@ npx playwright install chromium
 Use the bundled scripts before reimplementing the Playwright flow:
 
 - One-off crop: `node scripts/crop_google_earth.mjs --location "LOCATION" --cutoff YYYY-MM-DD --output path/to/crop.png`
-- Batch crop template: `node scripts/crop_permits_batch.mjs --csv permits.csv --output data/permits_batch`. Use this as the starting point for spreadsheet/CSV batch requests instead of creating a fresh Playwright loop. By default it processes all eligible rows in input order; add `--limit N` only for smoke tests.
+- CSV batch requests: follow the Batch Crop Template section below; copy `assets/templates/csv_batch_runner.template.mjs` to `/tmp` and customize only the temporary copy.
 - JSON report: written by default next to the PNG using the same basename and `.json` extension. Add `--summary path/to/report.json` to override or `--no-summary` to skip.
 - Zoom control: omit `--zoom-level` to use default zoom 19, or add `--zoom-level 21` for tighter roof-level crops. This patches both the Google Earth URL altitude (`a`) and camera range (`d`) fields; it is true source zoom, not a post-capture crop. When a zoom crop fails validation, the scripts try lower zoom levels down to zoom 18, then `--intermediate-fallback-camera-altitude` (`1000m` default) with one same-range retry, then `--large-fallback-camera-altitude` (`1500m` default).
 - Custom clip: add `--clip x,y,width,height`. Default is a `780x780` square centered on the query/camera point.
 - Red target dot: enabled by default at the centered viewport camera point. Add `--no-marker` to skip or `--marker-radius pixels` to resize.
 - Visible date label: enabled by default by OCRing the Google Earth bottom status-bar strip, then overlaying the parsed image date at the top left of the saved crop. The strip is not appended to the output PNG. If OCR cannot parse a date, retry only the tiny bottom-strip screenshot and OCR before saving the final crop without a date overlay. Add `--no-date-label` to skip both OCR and overlay, `--no-date-ocr` to disable OCR and therefore the overlay, or `--date-ocr-retries N` / `--date-ocr-retry-wait-ms MS` to tune retries.
-- OCR backfill: only for legacy crops with appended strips, run `node scripts/ocr_date_label.mjs --input path/to/crop.png --json path/to/crop.json` to add or refresh `imageDateOcr` without rerunning Google Earth.
-- Wider context: add `--preferred-camera-altitude meters` to bypass zoom-level fallback and use the older adaptive altitude sequence. Default preferred altitude/range is `500`; the script may fall back wider to avoid blank or low-detail crops.
+- Wider context: add `--preferred-camera-altitude meters` to bypass zoom-level fallback. Default preferred altitude/range is `500`; the script may fall back wider to avoid blank or low-detail crops.
 - Shared implementation: `scripts/google_earth_crop_core.mjs` contains URL readiness, `/data=` date patching, render settle, splash/blank checks, and low-detail checks.
 
-For normal crop requests, run or adapt `scripts/crop_google_earth.mjs`. For batch requests, run or adapt `scripts/crop_permits_batch.mjs`; it reuses one browser/page, calls `cropGoogleEarth`, writes PNG+JSON sidecars, retries failed crops, retries missing/implausible OCR dates once by default, and writes `batch-summary.json`. Treat the Fast Path below as the behavioral contract for custom code. Only recreate the Playwright sequence manually if the scripts cannot fit the requested output.
+For normal crop requests, run or adapt `scripts/crop_google_earth.mjs`. For batch requests, generate a temporary script from `assets/templates/csv_batch_runner.template.mjs`; it reuses one browser/page, calls `cropGoogleEarth`, writes PNG+JSON sidecars, and writes `batch-summary.json`. Treat the Fast Path below as the behavioral contract for custom code. Only recreate the Playwright sequence manually if the template cannot fit the requested output.
 
 ## Batch Crop Template
 
-Use `scripts/crop_permits_batch.mjs` as the reusable example for future bulk requests. The current script expects a CSV with `lon`, `lat`, `addr_tract_key`, and `permit_effective_date`, then processes eligible rows in input order and creates `before`/`after` crops with cutoffs at permit date minus/plus one year. It saves final names like `{addr_tract_key}_{before|after}_{YYYY-MM-DD}.png`, where the date is the parsed visible OCR imagery date when plausible, otherwise the query cutoff date. If duplicate address keys would collide, the script appends the source line to the output filename key.
+Use `assets/templates/csv_batch_runner.template.mjs` as the reusable scaffold for future bulk requests. Do not run arbitrary user CSVs directly through the packaged template and do not edit the packaged template for one user run. Instead, inspect the user's CSV headers and request, copy the template to a task-specific file under `/tmp`, customize only the mapping section, run a `--dry-run`, then run the generated `/tmp` script.
 
-When a future batch input differs, adapt the data-mapping functions near the bottom of the script rather than rewriting the crop engine:
+The template supports coordinates or address-style headers before customization. Date rules are intentionally customizable because user requests vary. For mapping examples, multiple-date rules, and the stable lower-level pieces to preserve, read `references/csv-batch-template.md`.
 
-- `parsePermitRows`: change CSV/header parsing and validation. For raw or uncleaned addresses, set `row.location` to the full address/place query that Google Earth should search; for coordinates, keep `row.location` as `lat,lon`. Preserve original source fields in the row object so the sidecar can record them.
-- `cropPhases`: change date parsing and cutoff derivation. Normalize all derived cutoffs to `YYYY-MM-DD` before calling `cropGoogleEarth`. This is the right place for custom windows, event dates, before/after offsets, or already-provided cutoff columns.
-- `baseLabel` construction and `filenameDateFor`: change output naming. Sanitize raw addresses for filenames, but do not over-clean the search query passed as `location`.
-- `rowForSummary` and `compactCropManifest`: update batch summaries and sidecars for the user's source columns and date rules.
-- Keep `cropWithRetries`, browser/page reuse, marker/date-label options, and `cropGoogleEarth` calls unless there is a specific reason to change behavior.
+Before running a long batch, use `--dry-run` to inspect eligible rows and derived cutoffs. Use `--limit N` only for a small input-order smoke test; for actual batch requests, filter the CSV upstream when the user wants a subset. For template/eval smoke tests, use the packaged fixture `assets/test-data/permit-sample-10.csv`; do not rely on workspace-root sample files. Delete or leave the `/tmp` generated script after the run; it is ephemeral and should not be committed.
 
-Before running a long batch, use `--dry-run` to inspect eligible rows and derived cutoffs. Use `--limit N` only for a small input-order smoke test; for actual batch requests, filter the CSV upstream when the user wants a subset.
-
-When asked to run the eval/benchmark, run it automatically:
-
-```bash
-node scripts/benchmark_google_earth_crop.mjs --output benchmark-runs/us-10-coordinate
-```
-
-Shortcuts: `npm run install:playwright`, `npm run crop -- --location "LOCATION" --output crop.png`, `npm run crop:permits-batch -- --csv permits.csv --output data/permits_batch`, `npm run eval`, `npm run eval:full`, `npm run check`.
+Shortcuts: `npm run install:playwright`, `npm run crop -- --location "LOCATION" --output crop.png`, `npm run eval`, `npm run eval:full`, `npm run check`.
 
 ## Fast Path
 
@@ -65,8 +52,8 @@ Shortcuts: `npm run install:playwright`, `npm run crop -- --location "LOCATION" 
 2. Wait only for `/search/`, a `canvas`, `/data=`, and a real URL camera `@lat,lon,alt a` where `alt > 1 && alt < 5_000_000` and `abs(lat)+abs(lon) > 0.001`.
    - If `location` is `lat,lon`, require camera distance from target `< 0.02`; do not reject a valid same-location camera just because it existed before navigation.
    - Otherwise, when reusing a page, require movement from the last confirmed ready camera `> 0.001`.
-3. Set `targetDate = cutoff_date - 1 day`. Patch the current `/data=` payload: base64url-decode, replace an existing ISO date if present, otherwise insert bytes `2a100801120a{YYYY-MM-DD}1801` before marker `42020801420208004a` and increase the root varint length by the inserted field length. Patch both URL camera altitude `a` and camera range `d`; changing only `a` records a new altitude but often does not visually zoom. For zoom-level crops, try the requested zoom, then lower zoom levels down to zoom 18, then the intermediate and large recovery ranges. Example for default zoom 19: `[300, 600, 1000, 1500]`, corresponding to zoom 19, zoom 18, intermediate fallback, and large fallback. At `1000m`, retry the same range once before falling to `1500m`. For `--preferred-camera-altitude` runs without `--zoom-level`, use the older adaptive altitude sequence.
-4. Navigate to the patched URL with `waitUntil: 'commit'`, wait about `500ms`, decode the last ISO date in `/data=`, and require `selectedDate === targetDate`. Retry date decoding briefly if navigation destroys the execution context. If patching or date validation fails, use fallback. Do not shorten the `500ms` post-history wait; the full benchmark showed shorter waits cause retries.
+3. Set `targetDate = cutoff_date - 1 day`. Patch the current `/data=` payload: base64url-decode, replace an existing ISO date if present, otherwise insert bytes `2a100801120a{YYYY-MM-DD}1801` before marker `42020801420208004a` and increase the root varint length by the inserted field length. Patch both URL camera altitude `a` and camera range `d`; changing only `a` records a new altitude but often does not visually zoom. For zoom-level crops, try the requested zoom, then lower zoom levels down to zoom 18, then the intermediate and large recovery ranges. Example for default zoom 19: `[300, 600, 1000, 1500]`, corresponding to zoom 19, zoom 18, intermediate fallback, and large fallback. At `1000m`, retry the same range once before falling to `1500m`. For `--preferred-camera-altitude` runs without `--zoom-level`, use the preferred-altitude path.
+4. Navigate to the patched URL with `waitUntil: 'commit'`, wait about `500ms`, decode the last ISO date in `/data=`, and require `selectedDate === targetDate`. Retry date decoding briefly if navigation destroys the execution context. If patching or date validation fails, use fallback. Keep the `500ms` post-history wait.
 5. Wait `3500ms` for Earth canvas render, plus a small `100ms` cushion for direct-coordinate URL reuse and about `1000ms` for ultra-close search-start crops. Then screenshot once with `scale: 'css'`, `fullPage: false`, and the centered square clip. Reject splash, blank, or low-detail/blurred tiles. For normal transient low-detail frames, wait `3000ms` and overwrite once, then fail if still invalid. For direct-coordinate recovery only, if the first `500m` screenshot is splash, blank, or extremely low detail and wider candidates remain, skip the same-altitude retry and move directly to the next wider candidate. After validation passes, overlay a red dot at the query/camera center, OCR the visible bottom status-bar strip, overlay the parsed image date at the crop's top left when available, and write that marked PNG at the original crop size.
 
 Skip `networkidle`, startup screenshots, accessibility/read-page dumps, popup cleanup, keyboard cleanup, menu clicks before fallback, full-page screenshots, and visual calibration.
@@ -75,14 +62,17 @@ Skip `networkidle`, startup screenshots, accessibility/read-page dumps, popup cl
 
 Only after fast-path failure: keep the default viewport; click Projects dismiss `(45,150)`, `View` `(176.5,16)`, `Show historical imagery` `(294,140)`, then previous-image chevron `(600,120)` until decoded URL date is before `cutoff_date`. Avoid `Escape`, `Tab`, `Enter`, and `Space`; they can clear or miss the historical date.
 
-Report saved PNG path, JSON sidecar path, decoded date, marker metadata, `fast-path`/`fallback`, and elapsed time.
+Report saved PNG path, JSON sidecar path, decoded date, marker metadata, and `fast-path`/`fallback`.
 
-## Benchmark
+## Eval
 
-2026-06-10, 10 random US coordinate crops, cutoff `2020-01-01`, direct injection, target-camera readiness, fixed `3500ms` render settle: `10/10` valid crops, mean `9.851s`, median `9.498s`, min `9.049s`, max `13.406s`. With adaptive neighborhood zoom plus centered square crop and red marker overlay/pixel verification: `10/10`, `markerDrawn: 10`, `markerCentered: 10`, mean about `19.554s`, median about `19.788s`.
+Run evals from the skill directory:
 
-2026-06-11 Agent Smith full-suite optimization, 10 coordinate crops, cutoff `2020-01-01`: baseline full-suite mean `8.363s`; best policy mean `7.943s`, `10/10` valid crops, `markerDrawn: 10`, `markerCentered: 10`, `retries: 0`. The best policy skips the same-altitude retry only for doomed direct-coordinate `500m` recovery screenshots when wider candidates remain; do not skip ordinary low-detail retries because transient tiles often recover on retry.
+```bash
+npm run check
+npm run eval
+```
 
-Observed fixes: `500ms` after injection is enough for URL date but can still save the Google Earth splash; screenshot byte size misses that failure. Camera movement alone can accept stale locations; coordinate searches need target proximity. Blurry low-resolution tiles can pass date/place checks, so the benchmark also requires a minimum crop detail score. Do not lower the `1000ms` ultra-close search-start cushion, remove the `100ms` direct-coordinate render cushion, lower base render settle to `3250ms`, or shorten direct-coordinate post-history wait to `300ms`; full-suite probes regressed or introduced retries.
+`npm run check` validates bundled scripts, JSON files, and the packaged CSV fixture. `npm run eval` runs the 10-coordinate Google Earth regression through `scripts/benchmark_google_earth_crop.mjs`.
 
-Repeatable regression test: `evals/evals.json`, `benchmarks/us-10-coordinate-benchmark.md`, and `scripts/benchmark_google_earth_crop.mjs`. Reusable crop implementation: `scripts/crop_google_earth.mjs` backed by `scripts/google_earth_crop_core.mjs`.
+For the CSV batch eval in `evals/evals.json`, use `assets/test-data/permit-sample-10.csv`: copy `assets/templates/csv_batch_runner.template.mjs` to `/tmp`, customize `mapRecordToCropJobs()` for `permit_effective_date` before/after cutoffs, dry-run all 10 rows to confirm 20 planned crops, then run the real smoke with `--limit 1`. Do not depend on workspace-root `permit_sample.csv`.

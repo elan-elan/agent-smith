@@ -30,17 +30,22 @@
     },
     {
       "id": 2,
-      "prompt": "Use the google-earth-crop skill for a tiny permit CSV batch smoke test. Create a temporary one-row CSV with lon, lat, addr_tract_key, address, and permit_effective_date columns, then run scripts/crop_permits_batch.mjs with that CSV and an output directory under /tmp. Report the before/after PNG paths, JSON sidecar paths, the date used in each filename, and whether imageDateOcr was parsed or fell back to the cutoff date.",
-      "expected_output": "A batch smoke run that uses scripts/crop_permits_batch.mjs instead of writing a fresh Playwright loop. It should process the eligible CSV rows in input order and create one before crop and one after crop for the one-row smoke CSV, each with a PNG and adjacent compact JSON sidecar. Filenames should use the addr_tract_key, phase, and OCR imagery date when plausible, otherwise the phase cutoff date. The saved crop should not include an appended bottom strip; it may include a top-left image-date overlay only when OCR parses the visible Google Earth status-bar date. batch-summary.json may retain detailed diagnostics, but each per-image JSON sidecar stays flat and minimal.",
+      "prompt": "Use the google-earth-crop skill for a tiny CSV batch smoke test using the packaged fixture assets/test-data/permit-sample-10.csv. Do not depend on the workspace-root permit_sample.csv. Copy assets/templates/csv_batch_runner.template.mjs to a task-specific script under /tmp, customize mapRecordToCropJobs so permit_effective_date produces before and after crops at minus/plus one year, use lat/lon as the Google Earth location while preserving address and addr_tract_key in sidecars, then run the /tmp script with --core-module pointing at scripts/google_earth_crop_core.mjs and an output directory under /tmp. Dry-run all 10 fixture rows, then run a real smoke with --limit 1. Report the dry-run planned row/crop counts, before/after PNG paths, JSON sidecar paths, the date used in each filename, and whether imageDateOcr was parsed or fell back to the cutoff date.",
+      "expected_output": "A batch smoke run that creates a task-specific /tmp script from assets/templates/csv_batch_runner.template.mjs instead of running or editing a packaged batch script directly. It should use assets/test-data/permit-sample-10.csv as the input fixture and should not read or require the workspace-root permit_sample.csv. The dry run should plan all 10 fixture rows in input order and produce 20 planned crops, one before and one after per row. The real smoke may use --limit 1 and should create one before crop and one after crop for the first fixture row, each with a PNG and adjacent compact JSON sidecar. The generated /tmp script should use lat/lon as the Google Earth location, preserve address and addr_tract_key in sidecars, and derive cutoff dates from permit_effective_date minus/plus one year. Filenames should use the chosen address key, phase, and OCR imagery date when plausible, otherwise the phase cutoff date. The saved crop should not include an appended bottom strip; it may include a top-left image-date overlay only when OCR parses the visible Google Earth status-bar date. batch-summary.json may retain detailed diagnostics, but each per-image JSON sidecar stays flat and minimal.",
       "files": [
         "SKILL.md",
+        "references/csv-batch-template.md",
         "scripts/google_earth_crop_core.mjs",
-        "scripts/crop_permits_batch.mjs"
+        "assets/templates/csv_batch_runner.template.mjs",
+        "assets/test-data/permit-sample-10.csv"
       ],
       "expectations": [
-        "The agent uses or adapts scripts/crop_permits_batch.mjs for the CSV batch instead of creating a separate browser loop.",
-        "The input CSV requires lon, lat, addr_tract_key, and permit_effective_date, and may use address when present.",
-        "The run creates both before and after crops for each eligible permit row using cutoff dates one year before and one year after permit_effective_date.",
+        "The agent copies assets/templates/csv_batch_runner.template.mjs to a task-specific /tmp script and does not edit the packaged template for the run.",
+        "The generated /tmp script customizes mapRecordToCropJobs for the provided CSV headers and user date rule.",
+        "The run uses assets/test-data/permit-sample-10.csv and does not depend on the workspace-root permit_sample.csv.",
+        "The dry run plans all 10 fixture rows and 20 crops in input order.",
+        "The generated script uses lat/lon coordinates as the Google Earth location and preserves address and addr_tract_key metadata.",
+        "The run creates both before and after crops for each eligible row using cutoff dates one year before and one year after permit_effective_date.",
         "Each PNG is saved without appending the OCR strip to the image.",
         "Each PNG includes a top-left image-date overlay only when the Google Earth bottom status-bar OCR returns a plausible imagery date.",
         "Each per-image JSON sidecar contains only address, addressKey, dateUsed, cutoffDate, location, outputPath, zoomLevel, googleEarthQueryUrl, and imageDateOcr, plus error only for failed crops.",
