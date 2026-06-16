@@ -20,6 +20,7 @@ import {
   DEFAULT_ZOOM_LEVEL,
   cameraRangeForZoomLevel,
   cropGoogleEarth,
+  googleEarthQueryUrl,
   labelForLocation,
   launchChromium,
   loadChromium,
@@ -123,45 +124,17 @@ process.exit(report.result.status === 'ok' ? 0 : 1);
 function compactCropManifest(cropReport, jsonPath) {
   const { result } = cropReport;
   const manifest = {
+    address: result.query,
+    addressKey: null,
+    dateUsed: result.selectedDate ?? cropReport.targetDate,
+    cutoffDate: cropReport.cutoffDate,
     location: result.query,
     outputPath: result.outputPath,
-    dates: {
-      cutoff: cropReport.cutoffDate,
-      target: cropReport.targetDate,
-      selected: result.selectedDate ?? null
-    },
-    camera: result.finalCamera ?? result.camera ?? null,
-    parameters: {
-      zoomLevel: cropReport.zoomLevel,
-      zoomCameraRange: cropReport.zoomCameraRange,
-      zoomCameraRangeCandidates: cropReport.zoomCameraRangeCandidates,
-      finalZoomLevel: result.finalZoomLevel ?? null,
-      zoomFallbackStep: result.zoomFallbackStep ?? null,
-      intermediateFallbackCameraAltitude: cropReport.intermediateFallbackCameraAltitude,
-      largeFallbackCameraAltitude: cropReport.largeFallbackCameraAltitude,
-      preferredCameraAltitude: cropReport.preferredCameraAltitude,
-      minDetailScore: cropReport.minDetailScore,
-      renderSettleMs: cropReport.renderSettleMs,
-      viewport: cropReport.viewport,
-      clip: cropReport.clip,
-      marker: {
-        enabled: cropReport.markLocation,
-        radius: cropReport.markerRadius
-      },
-      dateLabel: {
-        enabled: cropReport.includeDateLabel,
-        included: result.dateLabel?.included ?? false,
-        source: result.dateLabel?.source ?? 'google-earth-visible-bottom-status-bar',
-        position: result.dateLabel?.position ?? null,
-        clip: result.dateLabel?.clip ?? null,
-        overlay: result.dateLabel?.overlay ?? null,
-        ocr: result.dateLabel?.ocr ?? null
-      }
-    },
-    error: result.status === 'ok' ? undefined : result.error,
-    jsonPath: result.status === 'ok' ? undefined : jsonPath,
-    status: result.status === 'ok' ? undefined : result.status
+    zoomLevel: result.finalZoomLevel ?? cropReport.zoomLevel ?? null,
+    googleEarthQueryUrl: googleEarthQueryUrl(result.query),
+    imageDateOcr: result.dateLabel?.ocr?.imageryDate ?? null
   };
+  if (result.status !== 'ok') manifest.error = result.error;
   return JSON.parse(JSON.stringify(manifest));
 }
 

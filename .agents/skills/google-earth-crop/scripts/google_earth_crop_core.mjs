@@ -38,6 +38,10 @@ export function labelForLocation(location) {
   return location.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'google-earth-crop';
 }
 
+export function googleEarthQueryUrl(query) {
+  return `https://earth.google.com/web/search/${encodeURIComponent(query)}?hl=en`;
+}
+
 export async function loadChromium() {
   try {
     return (await import('playwright')).chromium;
@@ -409,7 +413,7 @@ function runCommand(command, args) {
 }
 
 function searchUrl(query) {
-  return `https://earth.google.com/web/search/${encodeURIComponent(query)}?hl=en`;
+  return googleEarthQueryUrl(query);
 }
 
 function coordinateTarget(query) {
