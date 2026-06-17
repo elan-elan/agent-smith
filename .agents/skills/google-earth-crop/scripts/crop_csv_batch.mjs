@@ -30,11 +30,13 @@ const COMMON_REQUIRED_COLUMNS = ['query_date', 'output_name'];
 const COORDINATE_LOCATION_COLUMNS = ['lat', 'lon'];
 const ADDRESS_LOCATION_COLUMNS = ['address', 'full_address', 'site_address', 'location', 'query'];
 const DEFAULT_NUM_WORKERS = 4;
+const DEFAULT_NUM_BROWSERS = 2;
 
 const csvOption = cliOptionValue('csv');
 const outputOption = cliOptionValue('output');
 const rowLimit = parseOptionalPositiveInteger(cliOptionValue('limit'), '--limit');
 const numWorkers = parseOptionalPositiveInteger(cliOptionValue('num-workers') ?? cliOptionValue('num_workers'), '--num-workers') ?? DEFAULT_NUM_WORKERS;
+const numBrowsers = parseOptionalPositiveInteger(cliOptionValue('num-browsers') ?? cliOptionValue('num_browsers'), '--num-browsers') ?? DEFAULT_NUM_BROWSERS;
 const cropRetries = Number(cliOptionValue('crop-retries') ?? 1);
 const missingOcrRetries = Number(cliOptionValue('missing-ocr-retries') ?? 1);
 const missingOcrRetryMode = cliOptionValue('missing-ocr-retry-mode') ?? 'fresh-context';
@@ -85,6 +87,7 @@ const rawRowsToPlan = rowLimit === null ? rawRows : rawRows.slice(0, rowLimit);
 const plannedRows = selectRows(rawRowsToPlan.map(planRow));
 const plannedCropCount = plannedRows.length;
 const actualWorkers = Math.min(numWorkers, plannedCropCount);
+const actualBrowsers = actualWorkers > 0 ? Math.min(numBrowsers, actualWorkers) : 0;
 
 if (cliFlag('dry-run')) {
   console.log(JSON.stringify({
@@ -98,7 +101,9 @@ if (cliFlag('dry-run')) {
     rowsToProcess: plannedRows.length,
     plannedCropCount,
     numWorkers,
+    numBrowsers,
     actualWorkers,
+    actualBrowsers,
     rows: plannedRows.map(rowForSummary)
   }, null, 2));
   process.exit(0);
@@ -107,15 +112,21 @@ if (cliFlag('dry-run')) {
 await fs.mkdir(outputDir, { recursive: true });
 
 const chromium = await loadChromium();
-const browser = await launchChromium(chromium, { headed: cliFlag('headed') });
+const browsers = [];
+for (let browserIndex = 0; browserIndex < actualBrowsers; browserIndex += 1) {
+  browsers.push(await launchChromium(chromium, { headed: cliFlag('headed') }));
+}
 const perCrop = new Array(plannedCropCount);
 const perLocation = new Array(plannedCropCount);
 let nextRowIndex = 0;
 
 try {
-  await Promise.all(Array.from({ length: actualWorkers }, (_, workerIndex) => runWorker(workerIndex + 1)));
+  await Promise.all(Array.from({ length: actualWorkers }, (_, workerIndex) => {
+    const browser = browsers[workerIndex % actualBrowsers];
+    return runWorker(workerIndex + 1, browser);
+  }));
 } finally {
-  await browser.close();
+  await Promise.all(browsers.map((browser) => browser.close().catch(() => {})));
   await terminateImageryDateOcrWorker();
 }
 
@@ -133,7 +144,9 @@ const batchReport = {
   rowsToProcess: plannedRows.length,
   plannedCropCount,
   numWorkers,
+  numBrowsers,
   actualWorkers,
+  actualBrowsers,
   zoomLevel,
   zoomCameraRange,
   zoomCameraRangeCandidates: perCrop[0]?.zoomCameraRangeCandidates ?? null,
@@ -170,7 +183,7 @@ function takeNextJob() {
   return { rowIndex, row: plannedRows[rowIndex] };
 }
 
-async function runWorker(workerId) {
+async function runWorker(workerId, browser) {
   let context = null;
   let page = null;
   const workerState = {
@@ -582,6 +595,8 @@ Options:
   --csv                  Required normalized input CSV
   --output               Required output directory
   --limit                Optional positive row prefix limit for smoke tests
+  --num-workers          Number of concurrent worker pages/contexts. Default: ${DEFAULT_NUM_WORKERS}
+  --num-browsers         Number of Chromium browser processes to distribute workers across. Default: ${DEFAULT_NUM_BROWSERS}
   --crop-retries         Full crop retries after core fallbacks fail. Default: 1
   --missing-ocr-retries  Retry successful crops that did not parse an imagery date. Default: 1
   --missing-ocr-retry-mode  How missing-OCR retries reset state: fresh-context or same-page. Default: fresh-context

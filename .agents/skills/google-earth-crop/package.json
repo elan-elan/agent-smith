@@ -11,6 +11,7 @@
     "eval:csv": "node scripts/crop_csv_batch.mjs --csv assets/test-data/coordinate-sample-10.csv --output benchmark-runs/csv-batch-smoke --limit 1",
     "eval:csv:address": "node scripts/crop_csv_batch.mjs --csv assets/test-data/address-sample-2.csv --output benchmark-runs/csv-address-smoke --limit 1",
     "eval:moorpark": "node scripts/crop_csv_batch.mjs --csv assets/test-data/moorpark-date-ocr.csv --output benchmark-runs/moorpark-date-ocr --missing-ocr-retries 0",
+    "eval:mackinnon": "node scripts/crop_google_earth.mjs --location \"4300 Mackinnon Industrial Parkway, Mobile, AL\" --cutoff 2025-01-01 --output benchmark-runs/mackinnon-conditional-probe/4300-mackinnon-industrial-parkway-mobile-al-before-2025-01-01.png --diagnostics benchmark-runs/mackinnon-conditional-probe/mackinnon-conditional-probe-report.json --match-requested-zoom-extent",
     "eval:blur": "node scripts/crop_csv_batch.mjs --csv assets/test-data/blurry-historical-refresh.csv --output benchmark-runs/blurry-historical-refresh --missing-ocr-retries 0",
     "eval:full": "npm install && npx playwright install chromium && node scripts/benchmark_google_earth_crop.mjs --output benchmark-runs/us-10-coordinate"
   },
