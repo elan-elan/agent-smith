@@ -29,10 +29,12 @@ import {
 const COMMON_REQUIRED_COLUMNS = ['query_date', 'output_name'];
 const COORDINATE_LOCATION_COLUMNS = ['lat', 'lon'];
 const ADDRESS_LOCATION_COLUMNS = ['address', 'full_address', 'site_address', 'location', 'query'];
+const DEFAULT_NUM_WORKERS = 4;
 
 const csvOption = cliOptionValue('csv');
 const outputOption = cliOptionValue('output');
 const rowLimit = parseOptionalPositiveInteger(cliOptionValue('limit'), '--limit');
+const numWorkers = parseOptionalPositiveInteger(cliOptionValue('num-workers') ?? cliOptionValue('num_workers'), '--num-workers') ?? DEFAULT_NUM_WORKERS;
 const cropRetries = Number(cliOptionValue('crop-retries') ?? 1);
 const missingOcrRetries = Number(cliOptionValue('missing-ocr-retries') ?? 1);
 const missingOcrRetryMode = cliOptionValue('missing-ocr-retry-mode') ?? 'fresh-context';
@@ -82,6 +84,7 @@ const rawRows = records.slice(1).map((record, recordIndex) => ({
 const rawRowsToPlan = rowLimit === null ? rawRows : rawRows.slice(0, rowLimit);
 const plannedRows = selectRows(rawRowsToPlan.map(planRow));
 const plannedCropCount = plannedRows.length;
+const actualWorkers = Math.min(numWorkers, plannedCropCount);
 
 if (cliFlag('dry-run')) {
   console.log(JSON.stringify({
@@ -94,6 +97,8 @@ if (cliFlag('dry-run')) {
     parsedRows: rawRows.length,
     rowsToProcess: plannedRows.length,
     plannedCropCount,
+    numWorkers,
+    actualWorkers,
     rows: plannedRows.map(rowForSummary)
   }, null, 2));
   process.exit(0);
@@ -103,31 +108,118 @@ await fs.mkdir(outputDir, { recursive: true });
 
 const chromium = await loadChromium();
 const browser = await launchChromium(chromium, { headed: cliFlag('headed') });
-let context = null;
-let page = null;
-
-async function openFreshPage() {
-  await context?.close().catch(() => {});
-  context = await browser.newContext({ viewport });
-  page = await context.newPage();
-  page.setDefaultTimeout(20000);
-}
-
-await openFreshPage();
-
-const perCrop = [];
-const perLocation = [];
-let lastConfirmedCamera = null;
-let lastConfirmedLocation = null;
+const perCrop = new Array(plannedCropCount);
+const perLocation = new Array(plannedCropCount);
+let nextRowIndex = 0;
 
 try {
-  for (const [rowIndex, row] of plannedRows.entries()) {
-    const baseLabel = row.outputName;
-    const temporaryOutputPath = path.join(outputDir, `.tmp-${process.pid}-${rowIndex + 1}-${baseLabel}.png`);
-    const previousCameraForReadiness = row.locationKind === 'address' && row.location === lastConfirmedLocation
-      ? null
-      : lastConfirmedCamera;
-    const result = await cropWithRetries(() => page, {
+  await Promise.all(Array.from({ length: actualWorkers }, (_, workerIndex) => runWorker(workerIndex + 1)));
+} finally {
+  await browser.close();
+  await terminateImageryDateOcrWorker();
+}
+
+const completedPerCrop = perCrop.filter(Boolean);
+const completedPerLocation = perLocation.filter(Boolean);
+const summary = buildSummary(completedPerCrop);
+const batchReport = {
+  date: new Date().toISOString(),
+  csvPath,
+  outputDir,
+  requiredColumns: COMMON_REQUIRED_COLUMNS,
+  locationColumnSets: [COORDINATE_LOCATION_COLUMNS, ['address']],
+  rowLimit,
+  parsedRows: rawRows.length,
+  rowsToProcess: plannedRows.length,
+  plannedCropCount,
+  numWorkers,
+  actualWorkers,
+  zoomLevel,
+  zoomCameraRange,
+  zoomCameraRangeCandidates: perCrop[0]?.zoomCameraRangeCandidates ?? null,
+  intermediateFallbackCameraAltitude,
+  largeFallbackCameraAltitude,
+  renderSettleMs,
+  minDetailScore,
+  minCenterSharpnessScore,
+  preferredCameraAltitude,
+  markLocation,
+  markerRadius,
+  includeDateLabel,
+  extractImageryDate,
+  missingOcrRetryMode,
+  imageryDateOcrRetries,
+  imageryDateOcrRetryWaitMs,
+  matchRequestedZoomExtent,
+  viewport,
+  clip,
+  results: summary,
+  rows: plannedRows.map(rowForSummary),
+  perLocation: completedPerLocation,
+  perCrop: completedPerCrop
+};
+
+await fs.writeFile(path.join(outputDir, 'batch-summary.json'), `${JSON.stringify(batchReport, null, 2)}\n`);
+console.log(JSON.stringify(summary, null, 2));
+process.exit(summary.failed === 0 && summary.total === plannedCropCount ? 0 : 1);
+
+function takeNextJob() {
+  if (nextRowIndex >= plannedRows.length) return null;
+  const rowIndex = nextRowIndex;
+  nextRowIndex += 1;
+  return { rowIndex, row: plannedRows[rowIndex] };
+}
+
+async function runWorker(workerId) {
+  let context = null;
+  let page = null;
+  const workerState = {
+    lastConfirmedCamera: null,
+    lastConfirmedLocation: null
+  };
+
+  async function openFreshPage() {
+    await context?.close().catch(() => {});
+    context = await browser.newContext({ viewport });
+    page = await context.newPage();
+    page.setDefaultTimeout(20000);
+  }
+
+  await openFreshPage();
+  try {
+    for (let job = takeNextJob(); job; job = takeNextJob()) {
+      const result = await processCropJob({
+        workerId,
+        rowIndex: job.rowIndex,
+        row: job.row,
+        workerState,
+        getPage: () => page,
+        resetPageForMissingOcr: openFreshPage
+      });
+      if (result.status !== 'ok' || page?.isClosed?.()) {
+        workerState.lastConfirmedCamera = null;
+        workerState.lastConfirmedLocation = null;
+        await openFreshPage();
+      }
+    }
+  } finally {
+    await context?.close().catch(() => {});
+  }
+}
+
+async function processCropJob({ workerId, rowIndex, row, workerState, getPage, resetPageForMissingOcr }) {
+  const baseLabel = row.outputName;
+  const temporaryOutputPath = path.join(outputDir, `.tmp-${process.pid}-${workerId}-${rowIndex + 1}-${baseLabel}.png`);
+  const finalOutputPath = path.join(outputDir, `${baseLabel}.png`);
+  const jsonPath = defaultSummaryPath(finalOutputPath);
+  const previousCameraForReadiness = row.locationKind === 'address' && row.location === workerState.lastConfirmedLocation
+    ? null
+    : workerState.lastConfirmedCamera;
+  const cropStart = Date.now();
+  let result = null;
+
+  try {
+    result = await cropWithRetries(() => getPage(), {
       location: row.location,
       outputPath: temporaryOutputPath,
       cutoffDate: row.queryDate,
@@ -153,77 +245,41 @@ try {
       cropRetries,
       missingOcrRetries,
       missingOcrRetryMode,
-      resetPageForMissingOcr: async () => {
-        await openFreshPage();
-      }
+      resetPageForMissingOcr
     });
-
-    const finalOutputPath = path.join(outputDir, `${baseLabel}.png`);
-    const jsonPath = defaultSummaryPath(finalOutputPath);
-    if (result.status === 'ok') {
-      await fs.rm(finalOutputPath, { force: true });
-      await fs.rename(temporaryOutputPath, finalOutputPath);
-    } else {
-      await fs.rm(temporaryOutputPath, { force: true });
-    }
-    result.outputPath = finalOutputPath;
-
-    if (result.status === 'ok') {
-      lastConfirmedCamera = result.camera;
-      lastConfirmedLocation = row.location;
-    }
-    perCrop.push(result);
-
-    const manifest = compactCropManifest({ row, result });
-    await fs.writeFile(jsonPath, `${JSON.stringify(manifest, null, 2)}\n`);
-    perLocation.push({ rowIndex: rowIndex + 1, row: rowForSummary(row), outputPath: finalOutputPath, jsonPath, status: result.status });
-    console.log(`${result.status.toUpperCase()} ${rowIndex + 1}/${plannedCropCount} ${path.basename(finalOutputPath)} cutoff=${row.queryDate} selected=${result.selectedDate ?? 'none'} ${result.totalMs}ms`);
+  } catch (error) {
+    result = {
+      status: 'error',
+      error: String(error?.stack || error?.message || error).slice(0, 1200),
+      query: row.location,
+      outputPath: temporaryOutputPath,
+      selectedDate: null,
+      totalMs: Date.now() - cropStart,
+      batchAttempt: null,
+      missingOcrRetryMode
+    };
   }
-} finally {
-  await context?.close().catch(() => {});
-  await browser.close();
-  await terminateImageryDateOcrWorker();
+
+  if (result.status === 'ok') {
+    await fs.rm(finalOutputPath, { force: true });
+    await fs.rename(temporaryOutputPath, finalOutputPath);
+  } else {
+    await fs.rm(temporaryOutputPath, { force: true });
+  }
+  result.outputPath = finalOutputPath;
+
+  if (result.status === 'ok') {
+    workerState.lastConfirmedCamera = result.camera;
+    workerState.lastConfirmedLocation = row.location;
+  }
+  perCrop[rowIndex] = result;
+
+  const manifest = compactCropManifest({ row, result });
+  await fs.writeFile(jsonPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  perLocation[rowIndex] = { rowIndex: rowIndex + 1, row: rowForSummary(row), outputPath: finalOutputPath, jsonPath, status: result.status, workerId };
+  console.log(`${result.status.toUpperCase()} ${rowIndex + 1}/${plannedCropCount} ${path.basename(finalOutputPath)} cutoff=${row.queryDate} selected=${result.selectedDate ?? 'none'} ${result.totalMs}ms worker=${workerId}`);
+  return result;
 }
-
-const summary = buildSummary(perCrop);
-const batchReport = {
-  date: new Date().toISOString(),
-  csvPath,
-  outputDir,
-  requiredColumns: COMMON_REQUIRED_COLUMNS,
-  locationColumnSets: [COORDINATE_LOCATION_COLUMNS, ['address']],
-  rowLimit,
-  parsedRows: rawRows.length,
-  rowsToProcess: plannedRows.length,
-  plannedCropCount,
-  zoomLevel,
-  zoomCameraRange,
-  zoomCameraRangeCandidates: perCrop[0]?.zoomCameraRangeCandidates ?? null,
-  intermediateFallbackCameraAltitude,
-  largeFallbackCameraAltitude,
-  renderSettleMs,
-  minDetailScore,
-  minCenterSharpnessScore,
-  preferredCameraAltitude,
-  markLocation,
-  markerRadius,
-  includeDateLabel,
-  extractImageryDate,
-  missingOcrRetryMode,
-  imageryDateOcrRetries,
-  imageryDateOcrRetryWaitMs,
-  matchRequestedZoomExtent,
-  viewport,
-  clip,
-  results: summary,
-  rows: plannedRows.map(rowForSummary),
-  perLocation,
-  perCrop
-};
-
-await fs.writeFile(path.join(outputDir, 'batch-summary.json'), `${JSON.stringify(batchReport, null, 2)}\n`);
-console.log(JSON.stringify(summary, null, 2));
-process.exit(summary.failed === 0 && summary.total === plannedCropCount ? 0 : 1);
 
 function validateRequiredHeaders(headersToValidate) {
   const missing = COMMON_REQUIRED_COLUMNS.filter((column) => !headersToValidate.includes(column));
@@ -283,7 +339,20 @@ async function cropWithRetries(getPage, cropOptions, { cropRetries: retries, mis
   const maxAttempts = Math.max(retries, ocrRetries) + 1;
   let currentCropOptions = cropOptions;
   for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex += 1) {
-    const result = await cropGoogleEarth(getPage(), currentCropOptions);
+    const attemptStart = Date.now();
+    let result;
+    try {
+      result = await cropGoogleEarth(getPage(), currentCropOptions);
+    } catch (error) {
+      result = {
+        status: 'error',
+        error: String(error?.stack || error?.message || error).slice(0, 1200),
+        query: currentCropOptions.location,
+        outputPath: currentCropOptions.outputPath,
+        selectedDate: null,
+        totalMs: Date.now() - attemptStart
+      };
+    }
     result.batchAttempt = attemptIndex + 1;
     result.missingOcrRetryMode = ocrRetryMode;
     finalResult = result;
@@ -302,8 +371,19 @@ async function cropWithRetries(getPage, cropOptions, { cropRetries: retries, mis
       }
     } else {
       console.warn(`RETRY ${currentCropOptions.label} attempt=${attemptIndex + 2} previous=${String(result.error || 'unknown').slice(0, 160)}`);
+      await resetPageForMissingOcr?.();
+      currentCropOptions = { ...currentCropOptions, previousCamera: null };
+      continue;
     }
-    await getPage().waitForTimeout(1500);
+    if (getPage()?.isClosed?.()) {
+      await resetPageForMissingOcr?.();
+      currentCropOptions = { ...currentCropOptions, previousCamera: null };
+      continue;
+    }
+    await getPage().waitForTimeout(1500).catch(async () => {
+      await resetPageForMissingOcr?.();
+      currentCropOptions = { ...currentCropOptions, previousCamera: null };
+    });
   }
   return finalResult;
 }
