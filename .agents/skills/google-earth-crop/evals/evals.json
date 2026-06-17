@@ -131,6 +131,30 @@
         "Any 1000m or 1500m recovery-range fallback crop records zoomExtentCrop.strategy recovery-range-center-crop-resize and zoomExtentCrop.cropRatio 0.3 in batch-summary.json.",
         "Verbose timing, retry, camera, marker, image-quality, OCR debug, and zoomExtentCrop details stay in batch-summary.json rather than per-image sidecars."
       ]
+    },
+    {
+      "id": 6,
+      "prompt": "Use the google-earth-crop skill to run the Mackinnon conditional date-probe regression. From the skill directory, run npm run eval:mackinnon. This one-off crop uses address \"4300 Mackinnon Industrial Parkway, Mobile, AL\" with cutoff 2025-01-01 and saves under benchmark-runs/mackinnon-conditional-probe. Report the PNG path, compact JSON sidecar path, verbose diagnostics report path, selected timeline date, parsed imageDateOcr, date-probe stale threshold, candidate dates that actually ran, planned candidate dates, whether the appended strip was saved, and whether the run avoided extra month-anchor probing because the first parsed visible imagery date was within 2 years of the cutoff.",
+      "expected_output": "A one-off crop run using scripts/crop_google_earth.mjs through npm run eval:mackinnon, not the CSV batch runner and not a workspace-root file. It should create benchmark-runs/mackinnon-conditional-probe/4300-mackinnon-industrial-parkway-mobile-al-before-2025-01-01.png, the adjacent compact JSON sidecar, and benchmark-runs/mackinnon-conditional-probe/mackinnon-conditional-probe-report.json with verbose diagnostics. The crop should use address 4300 Mackinnon Industrial Parkway, Mobile, AL, cutoffDate 2025-01-01, and parsed imageDateOcr 2024-03-10. dateUsed may be 2024-12-31 for the initial injected timeline candidate or 2024-03-10 when the crop core accepts a sharper before-cutoff historical refresh; either way, dateProbe.candidateDates should contain only the first fast candidate 2024-12-31. Because 2024-03-10 is within the default 2-year stale threshold for a 2025-01-01 cutoff, the one-off wrapper should stop after the fast first candidate rather than probing all planned month-end anchors. The appended Google Earth bottom status strip should be present, and a top-left Image date: 2024-03-10 overlay should be included when OCR succeeds.",
+      "files": [
+        "SKILL.md",
+        "README.md",
+        "package.json",
+        "scripts/crop_google_earth.mjs",
+        "scripts/google_earth_crop_core.mjs"
+      ],
+      "expectations": [
+        "The eval uses npm run eval:mackinnon, which invokes scripts/crop_google_earth.mjs for a one-off crop rather than scripts/crop_csv_batch.mjs.",
+        "The crop location is exactly 4300 Mackinnon Industrial Parkway, Mobile, AL and the cutoffDate is 2025-01-01.",
+        "The output PNG is benchmark-runs/mackinnon-conditional-probe/4300-mackinnon-industrial-parkway-mobile-al-before-2025-01-01.png with an adjacent compact JSON sidecar.",
+        "The compact JSON sidecar includes imageDateOcr 2024-03-10, and dateUsed is on or before 2024-12-31.",
+        "The saved PNG includes the red target dot and appended visible Google Earth bottom date/status strip.",
+        "The top-left overlay text is Image date: 2024-03-10 when OCR succeeds.",
+        "The verbose diagnostics report includes dateProbe metadata with the default staleImageDateBefore threshold of 2023-01-01 for the 2025-01-01 cutoff.",
+        "The verbose diagnostics report records plannedCandidateDates with multiple before-cutoff anchors, but candidateDates contains only 2024-12-31 because the first imageDateOcr is not older than 2023-01-01.",
+        "The run reports the conditional probing behavior clearly instead of implying that every planned month-end anchor was rendered.",
+        "The compact per-image JSON sidecar remains flat and minimal; verbose dateProbe details stay in the full result printed by the CLI or any explicit full summary output."
+      ]
     }
   ]
 }

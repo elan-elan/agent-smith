@@ -64,7 +64,7 @@ The crop engine OCRs the already-visible bottom date/status strip before opening
 
 Prompt: `Run the google-earth-crop benchmark/eval.`
 
-A passing run should report `total: 10`, `ok: 10`, `failed: 0`, and no splash, blank, or low-detail detections. Benchmark artifacts are written under `benchmark-runs/` and are ignored by git. The coordinate CSV batch smoke test uses `npm run eval:csv`; the address CSV batch smoke test uses `npm run eval:csv:address`; the Moorpark date-only OCR regression uses `npm run eval:moorpark`.
+A passing run should report `total: 10`, `ok: 10`, `failed: 0`, and no splash, blank, or low-detail detections. Benchmark artifacts are written under `benchmark-runs/` and are ignored by git. The coordinate CSV batch smoke test uses `npm run eval:csv`; the address CSV batch smoke test uses `npm run eval:csv:address`; the Moorpark date-only OCR regression uses `npm run eval:moorpark`; the Mackinnon conditional date-probe regression uses `npm run eval:mackinnon`.
 
 For a fast source check without launching Google Earth, run `npm run check` from the skill directory.
 

@@ -30,6 +30,7 @@ const CENTER_SHARPNESS_CROP_RATIO = 0.55;
 const LOWER_ZOOM_EXTENT_CROP_RATIO = 0.5;
 const RECOVERY_EXTENT_CROP_RATIO = 0.3;
 let imageryDateOcrWorkerPromise = null;
+let imageryDateOcrQueue = Promise.resolve();
 
 export function optionValue(name, args = process.argv) {
   const index = args.indexOf(`--${name}`);
@@ -589,11 +590,10 @@ function imageDateOverlayText(ocr) {
 }
 
 export async function extractImageryDateFromStrip(stripPng) {
-  const worker = await loadImageryDateOcrWorker();
-  const { data } = await worker.recognize(stripPng);
+  const { data } = await recognizeImageryDateOcr(stripPng);
   const text = normalizeImageryDateOcrText(data.text ?? '');
   const parsed = parseImageryDateFromOcrText(text);
-  const fallback = parsed ? null : await extractImageryDateFromProcessedStrip(worker, stripPng);
+  const fallback = parsed ? null : await extractImageryDateFromProcessedStrip(stripPng);
   return {
     source: 'tesseract.js-bottom-strip',
     text,
@@ -604,7 +604,6 @@ export async function extractImageryDateFromStrip(stripPng) {
 }
 
 export async function extractImageryDateFromAppendedStrip(imagePath, { stripHeight = 42 } = {}) {
-  const worker = await loadImageryDateOcrWorker();
   const image = await fs.readFile(imagePath);
   const { width, height } = pngDimensions(image);
   const rectangle = {
@@ -613,10 +612,10 @@ export async function extractImageryDateFromAppendedStrip(imagePath, { stripHeig
     width: Math.min(width, 780),
     height: Math.min(stripHeight, height)
   };
-  const { data } = await worker.recognize(image, { rectangle });
+  const { data } = await recognizeImageryDateOcr(image, { rectangle });
   const text = normalizeImageryDateOcrText(data.text ?? '');
   const parsed = parseImageryDateFromOcrText(text);
-  const fallback = parsed ? null : await extractImageryDateFromProcessedStrip(worker, cropPngStrip(image, rectangle));
+  const fallback = parsed ? null : await extractImageryDateFromProcessedStrip(cropPngStrip(image, rectangle));
   return {
     source: 'tesseract.js-appended-bottom-strip',
     text,
@@ -628,11 +627,23 @@ export async function extractImageryDateFromAppendedStrip(imagePath, { stripHeig
 }
 
 export async function terminateImageryDateOcrWorker() {
+  const queue = imageryDateOcrQueue;
+  imageryDateOcrQueue = Promise.resolve();
+  await queue.catch(() => {});
   if (!imageryDateOcrWorkerPromise) return;
   const workerPromise = imageryDateOcrWorkerPromise;
   imageryDateOcrWorkerPromise = null;
   const worker = await workerPromise.catch(() => null);
   await worker?.terminate?.();
+}
+
+async function recognizeImageryDateOcr(image, options) {
+  const recognition = imageryDateOcrQueue.then(async () => {
+    const worker = await loadImageryDateOcrWorker();
+    return worker.recognize(image, options);
+  });
+  imageryDateOcrQueue = recognition.catch(() => {});
+  return recognition;
 }
 
 async function loadImageryDateOcrWorker() {
@@ -684,11 +695,11 @@ function mdyToIsoDate(month, day, year) {
   return date.toISOString().slice(0, 10);
 }
 
-async function extractImageryDateFromProcessedStrip(worker, stripPng) {
+async function extractImageryDateFromProcessedStrip(stripPng) {
   const candidates = processedStripOcrCandidates(stripPng);
   let best = null;
   for (const candidate of candidates) {
-    const { data } = await worker.recognize(candidate.png);
+    const { data } = await recognizeImageryDateOcr(candidate.png);
     const text = normalizeImageryDateOcrText(data.text ?? '');
     const parsed = parseImageryDateFromOcrText(text);
     const result = {
