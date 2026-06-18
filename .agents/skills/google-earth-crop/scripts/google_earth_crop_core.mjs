@@ -29,6 +29,7 @@ const HISTORICAL_TILE_REFRESH_NEWER = { x: 420, y: 120 };
 const CENTER_SHARPNESS_CROP_RATIO = 0.55;
 const LOWER_ZOOM_EXTENT_CROP_RATIO = 0.5;
 const RECOVERY_EXTENT_CROP_RATIO = 0.3;
+const URL_CAMERA_PATTERN = /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)a(?:,(-?\d+(?:\.\d+)?)d)?/;
 let imageryDateOcrWorkerPromise = null;
 let imageryDateOcrQueue = Promise.resolve();
 
@@ -466,8 +467,9 @@ async function waitForReady(page, { previousCamera, targetCamera }) {
   let lastCamera = null;
 
   while (Date.now() < deadline) {
-    const camera = cameraFromUrl(page.url());
-    if (camera) lastCamera = camera;
+    const rawCamera = cameraFromUrl(page.url());
+    const camera = readyCameraFromUrlCamera(rawCamera);
+    if (rawCamera) lastCamera = rawCamera;
     const targetOk = targetCamera
       ? camera && cameraDistance(camera, targetCamera) < 0.02
       : camera && (!previousCamera || cameraDistance(camera, previousCamera) > 0.001);
@@ -502,11 +504,20 @@ function cameraDistance(camera, target) {
 }
 
 function cameraFromUrl(url) {
-  const match = url.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),([\d.]+)a(?:,([\d.]+)d)?/);
+  const match = url.match(URL_CAMERA_PATTERN);
   if (!match) return null;
   const camera = { lat: Number(match[1]), lon: Number(match[2]), alt: Number(match[3]), range: Number(match[4]) };
   if (!Number.isFinite(camera.range)) delete camera.range;
   return Number.isFinite(camera.lat) && Number.isFinite(camera.lon) && Number.isFinite(camera.alt) ? camera : null;
+}
+
+function readyCameraFromUrlCamera(camera) {
+  if (!camera) return null;
+  if (camera.alt > 1 && camera.alt < 5_000_000) return camera;
+  if (Number.isFinite(camera.range) && camera.range > 1 && camera.range < 5_000_000) {
+    return { ...camera, alt: camera.range, rescuedAltitudeFromRange: true };
+  }
+  return camera;
 }
 
 function cameraAltitudeCandidates(currentAltitude, preferredAltitude, { allowWiderThanCurrent = false } = {}) {
@@ -534,14 +545,14 @@ function cameraAltitudeCandidates(currentAltitude, preferredAltitude, { allowWid
 
 function withCameraAltitude(url, altitude) {
   if (!Number.isFinite(altitude) || altitude <= 0) return url;
-  return url.replace(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),([\d.]+)a(?:,([\d.]+)d)?/, `@$1,$2,${formatAltitude(altitude)}a,${formatAltitude(altitude)}d`);
+  return url.replace(URL_CAMERA_PATTERN, `@$1,$2,${formatAltitude(altitude)}a,${formatAltitude(altitude)}d`);
 }
 
 function withCamera(url, camera) {
   if (!Number.isFinite(camera?.lat) || !Number.isFinite(camera?.lon) || !Number.isFinite(camera?.alt) || camera.alt <= 0) return null;
   if (!url.includes('/data=') || !cameraFromUrl(url)) return null;
   const range = Number.isFinite(camera.range) && camera.range > 0 ? camera.range : camera.alt;
-  return url.replace(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),([\d.]+)a(?:,([\d.]+)d)?/, `@${formatCoordinate(camera.lat)},${formatCoordinate(camera.lon)},${formatAltitude(camera.alt)}a,${formatAltitude(range)}d`);
+  return url.replace(URL_CAMERA_PATTERN, `@${formatCoordinate(camera.lat)},${formatCoordinate(camera.lon)},${formatAltitude(camera.alt)}a,${formatAltitude(range)}d`);
 }
 
 function locationMarkerForClip(clip, viewport, { enabled, radius }) {
