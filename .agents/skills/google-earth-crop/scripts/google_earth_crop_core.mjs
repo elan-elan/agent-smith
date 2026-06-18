@@ -24,8 +24,9 @@ export const DEFAULT_IMAGERY_DATE_OCR_RETRY_WAIT_MS = 1000;
 const LOWEST_STANDARD_ZOOM_FALLBACK_LEVEL = 18;
 const ULTRA_CLOSE_CAMERA_ALTITUDE = 100;
 const ROOF_ZOOM_LEVEL_RANGE_METERS = 75;
-const HISTORICAL_TILE_REFRESH_OLDER = { x: 300, y: 120 };
-const HISTORICAL_TILE_REFRESH_NEWER = { x: 420, y: 120 };
+export const HISTORICAL_TILE_REFRESH_OLDER = { x: 300, y: 120 };
+export const HISTORICAL_TILE_REFRESH_NEWER = { x: 420, y: 120 };
+export const HISTORICAL_PREVIOUS_IMAGE_CLICK = { x: 600, y: 120 };
 const CENTER_SHARPNESS_CROP_RATIO = 0.55;
 const LOWER_ZOOM_EXTENT_CROP_RATIO = 0.5;
 const RECOVERY_EXTENT_CROP_RATIO = 0.3;
@@ -503,7 +504,7 @@ function cameraDistance(camera, target) {
   return Math.abs(camera.lat - target.lat) + Math.abs(camera.lon - target.lon);
 }
 
-function cameraFromUrl(url) {
+export function cameraFromUrl(url) {
   const match = url.match(URL_CAMERA_PATTERN);
   if (!match) return null;
   const camera = { lat: Number(match[1]), lon: Number(match[2]), alt: Number(match[3]), range: Number(match[4]) };
@@ -511,7 +512,7 @@ function cameraFromUrl(url) {
   return Number.isFinite(camera.lat) && Number.isFinite(camera.lon) && Number.isFinite(camera.alt) ? camera : null;
 }
 
-function readyCameraFromUrlCamera(camera) {
+export function readyCameraFromUrlCamera(camera) {
   if (!camera) return null;
   if (camera.alt > 1 && camera.alt < 5_000_000) return camera;
   if (Number.isFinite(camera.range) && camera.range > 1 && camera.range < 5_000_000) {
@@ -543,12 +544,12 @@ function cameraAltitudeCandidates(currentAltitude, preferredAltitude, { allowWid
   return candidates;
 }
 
-function withCameraAltitude(url, altitude) {
+export function withCameraAltitude(url, altitude) {
   if (!Number.isFinite(altitude) || altitude <= 0) return url;
   return url.replace(URL_CAMERA_PATTERN, `@$1,$2,${formatAltitude(altitude)}a,${formatAltitude(altitude)}d`);
 }
 
-function withCamera(url, camera) {
+export function withCamera(url, camera) {
   if (!Number.isFinite(camera?.lat) || !Number.isFinite(camera?.lon) || !Number.isFinite(camera?.alt) || camera.alt <= 0) return null;
   if (!url.includes('/data=') || !cameraFromUrl(url)) return null;
   const range = Number.isFinite(camera.range) && camera.range > 0 ? camera.range : camera.alt;
@@ -1024,7 +1025,7 @@ function isGoogleEarthHelpPopupBackground(red, green, blue) {
   return neutralLight || paleBlue;
 }
 
-async function showHistoricalImageryUi(page) {
+export async function showHistoricalImageryUi(page) {
   await page.mouse.click(45, 150).catch(() => {});
   await page.waitForTimeout(300);
   await page.mouse.click(176.5, 16);
@@ -1033,7 +1034,7 @@ async function showHistoricalImageryUi(page) {
   await page.waitForTimeout(1500);
 }
 
-async function refreshHistoricalTilesBeforeCutoff(page, selectedDate, latestAllowedDate, {
+export async function refreshHistoricalTilesBeforeCutoff(page, selectedDate, latestAllowedDate, {
   clip = DEFAULT_CLIP,
   minDetailScore = DEFAULT_MIN_DETAIL_SCORE,
   minCenterSharpnessScore = DEFAULT_MIN_CENTER_SHARPNESS_SCORE,
@@ -1422,14 +1423,14 @@ function encodeDataPayload(buffer) {
   return buffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
-function selectedDateFromUrl(url) {
+export function selectedDateFromUrl(url) {
   const match = url.match(/\/data=([^?#]+)/);
   if (!match) return null;
   const dates = decodeDataPayload(match[1]).toString('latin1').match(/\d{4}-\d{2}-\d{2}/g);
   return dates?.at(-1) ?? null;
 }
 
-function withHistoricalDate(url, dateText) {
+export function withHistoricalDate(url, dateText) {
   const [prefix, rest] = url.split('/data=');
   if (!rest) throw new Error('No Google Earth /data= payload');
   const [data, query = 'hl=en'] = rest.split('?');
@@ -1481,7 +1482,7 @@ function writeVarint(value) {
   return Buffer.from(bytes);
 }
 
-function analyzeShot(screenshot, minDetailScore, minCenterSharpnessScore = DEFAULT_MIN_CENTER_SHARPNESS_SCORE) {
+export function analyzeShot(screenshot, minDetailScore, minCenterSharpnessScore = DEFAULT_MIN_CENTER_SHARPNESS_SCORE) {
   const { width, height, data } = decodePngRgba(screenshot);
 
   const countRegion = (xStartRatio, xEndRatio, yStartRatio, yEndRatio, predicate) => {
