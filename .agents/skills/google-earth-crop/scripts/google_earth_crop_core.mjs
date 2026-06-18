@@ -281,7 +281,8 @@ export async function cropGoogleEarth(page, options) {
             requestedZoomLevel,
             finalZoomLevel: attempt.finalZoomLevel,
             fallbackStep: candidate.fallbackStep,
-            requestedCameraAltitude: candidate.cameraAltitude
+            requestedCameraAltitude: candidate.cameraAltitude,
+            fallbackZoomLevel: candidate.zoomLevel
           });
           if (zoomExtentCrop.applied) {
             output = zoomExtentCrop.image;
@@ -402,7 +403,7 @@ export function buildSummary(results) {
     strictCameraAltitudeMatched: strictCameraAltitudeOk.filter((result) => Math.abs((result.finalCamera?.range ?? Infinity) - result.preferredCameraAltitude) < 1e-6).length,
     zoomFallbackRequired: zoomLevelResults.length,
     requestedZoomLevelMatched: zoomLevelOk.filter((result) => Number.isFinite(result.finalZoomLevel) && Math.abs(result.finalZoomLevel - result.zoomLevel) < 1e-6).length,
-    lowerZoomFallbackUsed: zoomLevelOk.filter((result) => Number.isFinite(result.finalZoomLevel) && result.finalZoomLevel < result.zoomLevel).length,
+    lowerZoomFallbackUsed: zoomLevelOk.filter((result) => result.zoomFallbackStep === 'lower-zoom-fallback' || (Number.isFinite(result.finalZoomLevel) && result.finalZoomLevel < result.zoomLevel)).length,
     intermediateCameraFallbackUsed: zoomLevelOk.filter((result) => result.zoomFallbackStep === 'intermediate-fallback').length,
     largeCameraFallbackUsed: zoomLevelOk.filter((result) => result.zoomFallbackStep === 'large-fallback').length,
     zoomExtentCropped: ok.filter((result) => result.zoomExtentCrop?.applied).length,
@@ -431,7 +432,7 @@ function normalizedZoomLevel(value) {
   return Number.isFinite(zoom) && zoom > 0 ? zoom : null;
 }
 
-function zoomLevelCameraCandidates(zoomLevel, {
+export function zoomLevelCameraCandidates(zoomLevel, {
   intermediateFallbackCameraAltitude = DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE,
   largeFallbackCameraAltitude = DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE
 } = {}) {
@@ -932,10 +933,11 @@ async function captureImageryDateLabelStrip(page, clip, { extractImageryDate, re
   return latest;
 }
 
-async function screenshotWithoutTransientUi(page, clip) {
+export async function screenshotWithoutTransientUi(page, clip) {
+  const popupDismissal = await dismissGoogleEarthHelpPopup(page);
   const screenshot = await page.screenshot({ fullPage: false, scale: 'css', clip });
   const transientUi = detectAskGoogleEarthHelpPopup(screenshot);
-  if (!transientUi.detected) return { screenshot, transientUi };
+  if (!transientUi.detected) return { screenshot, transientUi: popupDismissal.dismissed ? { ...transientUi, popupDismissal } : transientUi };
 
   await page.mouse.click(clip.x + transientUi.dismiss.x, clip.y + transientUi.dismiss.y).catch(() => {});
   await page.waitForTimeout(500);
@@ -949,6 +951,16 @@ async function screenshotWithoutTransientUi(page, clip) {
       stillDetectedAfterDismiss: cleanedUi.detected
     }
   };
+}
+
+async function dismissGoogleEarthHelpPopup(page) {
+  try {
+    await page.getByText('Dismiss', { exact: true }).click({ timeout: 700 });
+    await page.waitForTimeout(300);
+    return { dismissed: true, method: 'text-dismiss-button' };
+  } catch {
+    return { dismissed: false };
+  }
 }
 
 function recordTransientUiDismissal(attempt, transientUi) {
@@ -1238,7 +1250,7 @@ async function overlayImageDateText(page, imagePng, text) {
   };
 }
 
-async function cropFallbackToRequestedExtent(page, imagePng, { requestedZoomLevel, finalZoomLevel, fallbackStep, requestedCameraAltitude }) {
+export async function cropFallbackToRequestedExtent(page, imagePng, { requestedZoomLevel, finalZoomLevel, fallbackStep, requestedCameraAltitude, fallbackZoomLevel = null }) {
   if (!Number.isFinite(requestedZoomLevel)) {
     return { applied: false, image: imagePng };
   }
@@ -1256,8 +1268,11 @@ async function cropFallbackToRequestedExtent(page, imagePng, { requestedZoomLeve
     });
   }
 
-  const zoomDelta = requestedZoomLevel - finalZoomLevel;
-  if (!Number.isFinite(finalZoomLevel) || !Number.isFinite(zoomDelta) || zoomDelta <= 0) {
+  const effectiveFinalZoomLevel = Number.isFinite(finalZoomLevel)
+    ? finalZoomLevel
+    : (fallbackStep === 'lower-zoom-fallback' && Number.isFinite(fallbackZoomLevel) ? fallbackZoomLevel : null);
+  const zoomDelta = requestedZoomLevel - effectiveFinalZoomLevel;
+  if (!Number.isFinite(effectiveFinalZoomLevel) || !Number.isFinite(zoomDelta) || zoomDelta <= 0) {
     return { applied: false, image: imagePng };
   }
 
@@ -1268,6 +1283,8 @@ async function cropFallbackToRequestedExtent(page, imagePng, { requestedZoomLeve
       strategy: 'lower-zoom-center-crop-resize',
       requestedZoomLevel,
       finalZoomLevel,
+      effectiveFinalZoomLevel,
+      inferredFinalZoomLevel: !Number.isFinite(finalZoomLevel),
       zoomDelta,
       fallbackStep,
       requestedCameraAltitude

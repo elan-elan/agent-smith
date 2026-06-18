@@ -4,6 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   DEFAULT_CLIP,
+  DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE,
+  DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE,
   DEFAULT_MIN_CENTER_SHARPNESS_SCORE,
   DEFAULT_MIN_DETAIL_SCORE,
   DEFAULT_RENDER_SETTLE_MS,
@@ -15,6 +17,7 @@ import {
   cameraFromUrl,
   cameraRangeForZoomLevel,
   cropGoogleEarth,
+  cropFallbackToRequestedExtent,
   googleEarthQueryUrl,
   labelForLocation,
   launchChromium,
@@ -24,11 +27,13 @@ import {
   parseClip,
   readyCameraFromUrlCamera,
   refreshHistoricalTilesBeforeCutoff,
+  screenshotWithoutTransientUi,
   selectedDateFromUrl,
   showHistoricalImageryUi,
   terminateImageryDateOcrWorker,
   withCameraAltitude,
-  withHistoricalDate
+  withHistoricalDate,
+  zoomLevelCameraCandidates
 } from './google_earth_crop_core.mjs';
 
 const DEFAULT_BURST_RENDER_SETTLE_MS = 1800;
@@ -39,7 +44,7 @@ const DEFAULT_END_YEAR = 2026;
 const DEFAULT_ANNUAL_FROM_YEAR = 2016;
 const DEFAULT_OLDER_YEAR_INTERVAL = 2;
 const DEFAULT_NUM_WORKERS = 4;
-const DEFAULT_NUM_BROWSERS = 2;
+const DEFAULT_NUM_BROWSERS = 4;
 const DEFAULT_RETRY_NUM_WORKERS = 2;
 const DEFAULT_RETRY_NUM_BROWSERS = 2;
 const DEFAULT_MODE = 'annual-inject';
@@ -63,17 +68,22 @@ const renderSettleMs = Number(optionValue('render-settle-ms') ?? DEFAULT_BURST_R
 const historyChangeTimeoutMs = Number(optionValue('history-change-timeout-ms') ?? DEFAULT_HISTORY_CHANGE_TIMEOUT_MS);
 const historyWaitMs = Number(optionValue('history-wait-ms') ?? DEFAULT_HISTORY_WAIT_MS);
 const qualityRetryWaitMs = Number(optionValue('quality-retry-wait-ms') ?? 3000);
-const qualityRetry = optionFlag('quality-retry');
+const qualityRetry = !optionFlag('no-quality-retry');
 const tileRefreshRetry = qualityRetry && !optionFlag('no-tile-refresh-retry');
+const zoomFallback = !optionFlag('no-zoom-fallback');
+const matchRequestedZoomExtent = !optionFlag('no-match-requested-zoom-extent');
 const numWorkers = parseOptionalPositiveInteger(optionValue('num-workers') ?? optionValue('num_workers'), '--num-workers') ?? DEFAULT_NUM_WORKERS;
 const numBrowsers = parseOptionalPositiveInteger(optionValue('num-browsers') ?? optionValue('num_browsers'), '--num-browsers') ?? DEFAULT_NUM_BROWSERS;
 const retryNumWorkers = parseOptionalPositiveInteger(optionValue('retry-num-workers') ?? optionValue('retry_num_workers'), '--retry-num-workers') ?? Math.min(DEFAULT_RETRY_NUM_WORKERS, numWorkers);
 const retryNumBrowsers = parseOptionalPositiveInteger(optionValue('retry-num-browsers') ?? optionValue('retry_num_browsers'), '--retry-num-browsers') ?? Math.min(DEFAULT_RETRY_NUM_BROWSERS, numBrowsers);
 const zoomLevel = optionValue('zoom-level') ? Number(optionValue('zoom-level')) : DEFAULT_ZOOM_LEVEL;
 const preferredCameraAltitude = Number(optionValue('preferred-camera-altitude') ?? cameraRangeForZoomLevel(zoomLevel) ?? 300);
+const intermediateFallbackCameraAltitude = Number(optionValue('intermediate-fallback-camera-altitude') ?? DEFAULT_INTERMEDIATE_FALLBACK_CAMERA_ALTITUDE);
+const largeFallbackCameraAltitude = Number(optionValue('large-fallback-camera-altitude') ?? DEFAULT_LARGE_FALLBACK_CAMERA_ALTITUDE);
 const clip = parseClip(optionValue('clip'));
 const headed = optionFlag('headed');
 const dryRun = optionFlag('dry-run');
+const calibrateFirstFrame = !optionFlag('no-calibrate-first-frame');
 const includeLatest = !optionFlag('no-latest');
 const minDetailScore = Number(optionValue('min-detail-score') ?? (zoomLevel && zoomLevel >= DEFAULT_ZOOM_LEVEL ? 40 : DEFAULT_MIN_DETAIL_SCORE));
 const minCenterSharpnessScore = Number(optionValue('min-center-sharpness-score') ?? DEFAULT_MIN_CENTER_SHARPNESS_SCORE);
@@ -100,6 +110,7 @@ if (dryRun) {
     outputDir,
     targetDates: targetDates.slice(0, maxFrames ?? undefined),
     totalTargetDates: targetDates.slice(0, maxFrames ?? undefined).length,
+    calibrateFirstFrame,
     maxFrames
   };
   await fs.mkdir(outputDir, { recursive: true });
@@ -164,6 +175,11 @@ const summary = {
   qualityRetryWaitMs,
   qualityRetry,
   tileRefreshRetry,
+  zoomFallback,
+  matchRequestedZoomExtent,
+  calibrateFirstFrame,
+  intermediateFallbackCameraAltitude,
+  largeFallbackCameraAltitude,
   numWorkers,
   numBrowsers,
   retryNumWorkers,
@@ -389,6 +405,8 @@ async function runUiClickBurst(page, mode, modeOutputDir, clickPoint, { actualWo
 async function runAnnualInjectBurst(mode, modeOutputDir, dates, browsers, { actualWorkers, actualBrowsers }) {
   const frames = new Array(dates.length);
   const workerReports = [];
+  const cameraCandidateUpdates = [];
+  let sharedCameraCandidate = null;
   let nextDateIndex = 0;
 
   const takeNextJob = () => {
@@ -397,6 +415,73 @@ async function runAnnualInjectBurst(mode, modeOutputDir, dates, browsers, { actu
     nextDateIndex += 1;
     return { dateIndex, requestedDate: dates[dateIndex] };
   };
+
+  const promoteCameraCandidate = (frame, source) => {
+    const candidate = preferredCameraCandidateFromFrame(frame);
+    if (!candidate || sameBurstCameraCandidate(candidate, sharedCameraCandidate)) return;
+    sharedCameraCandidate = candidate;
+    cameraCandidateUpdates.push({
+      source,
+      frameNumber: frame.frameNumber,
+      requestedDate: frame.requestedDate,
+      selectedDate: frame.selectedDate,
+      candidate: cameraCandidateSummary(candidate)
+    });
+  };
+
+  async function captureAnnualInjectJob(page, { dateIndex, requestedDate, workerId }) {
+    const initialCandidate = burstCameraCandidates(sharedCameraCandidate)[0];
+    const navigationStart = Date.now();
+    const historicalUrl = withHistoricalDate(page.url(), requestedDate);
+    const zoomUrl = withCameraAltitude(historicalUrl, initialCandidate.cameraAltitude);
+    await page.goto(zoomUrl, { waitUntil: 'commit', timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(historyWaitMs);
+    const selectedDate = await waitForSelectedDate(page, requestedDate, historyChangeTimeoutMs);
+    return saveBurstFrame(page, modeOutputDir, {
+      mode,
+      frameNumber: dateIndex + 1,
+      requestedDate,
+      selectedDate: selectedDate.selectedDate,
+      label: requestedDate,
+      workerId,
+      preferredCameraCandidate: sharedCameraCandidate,
+      navigation: {
+        strategy: 'direct-date-injection',
+        navigationMs: Date.now() - navigationStart,
+        dateMatched: selectedDate.selectedDate === requestedDate,
+        waitMs: selectedDate.waitMs,
+        initialCameraCandidate: cameraCandidateSummary(initialCandidate),
+        preferredCameraCandidate: cameraCandidateSummary(sharedCameraCandidate)
+      }
+    });
+  }
+
+  if (calibrateFirstFrame && zoomFallback && dates.length > 1) {
+    const calibrationReport = { workerId: 0, browserIndex: 0, role: 'first-frame-calibration', frames: 0, open: null, totalMs: null, errors: [], cameraCandidateUpdates: [] };
+    const calibrationStart = Date.now();
+    let context = null;
+    try {
+      context = await browsers[0].newContext({ viewport: DEFAULT_VIEWPORT });
+      const page = await context.newPage();
+      page.setDefaultTimeout(20000);
+      calibrationReport.open = await openAddress(page);
+      const calibrationJob = takeNextJob();
+      if (calibrationJob) {
+        const frame = await captureAnnualInjectJob(page, { ...calibrationJob, workerId: 0 });
+        frames[calibrationJob.dateIndex] = frame;
+        calibrationReport.frames += 1;
+        promoteCameraCandidate(frame, 'first-frame-calibration');
+        calibrationReport.cameraCandidateUpdates = cameraCandidateUpdates.slice();
+        console.log(`${frame.status.toUpperCase()} ${calibrationJob.dateIndex + 1}/${dates.length} ${calibrationJob.requestedDate} selected=${frame.selectedDate ?? 'none'} ${frame.totalMs}ms worker=calibration`);
+      }
+    } catch (error) {
+      calibrationReport.errors.push({ workerError: String(error.stack || error.message || error).slice(0, 1000) });
+    } finally {
+      calibrationReport.totalMs = Date.now() - calibrationStart;
+      workerReports.push(calibrationReport);
+      await context?.close().catch(() => {});
+    }
+  }
 
   await Promise.all(Array.from({ length: actualWorkers }, async (_, workerIndex) => {
     const workerId = workerIndex + 1;
@@ -420,26 +505,8 @@ async function runAnnualInjectBurst(mode, modeOutputDir, dates, browsers, { actu
         const { dateIndex, requestedDate } = job;
         let frame;
         try {
-          const navigationStart = Date.now();
-          const historicalUrl = withHistoricalDate(page.url(), requestedDate);
-          const zoomUrl = withCameraAltitude(historicalUrl, preferredCameraAltitude);
-          await page.goto(zoomUrl, { waitUntil: 'commit', timeout: 15000 }).catch(() => {});
-          await page.waitForTimeout(historyWaitMs);
-          const selectedDate = await waitForSelectedDate(page, requestedDate, historyChangeTimeoutMs);
-          frame = await saveBurstFrame(page, modeOutputDir, {
-            mode,
-            frameNumber: dateIndex + 1,
-            requestedDate,
-            selectedDate: selectedDate.selectedDate,
-            label: requestedDate,
-            workerId,
-            navigation: {
-              strategy: 'direct-date-injection',
-              navigationMs: Date.now() - navigationStart,
-              dateMatched: selectedDate.selectedDate === requestedDate,
-              waitMs: selectedDate.waitMs
-            }
-          });
+          frame = await captureAnnualInjectJob(page, { dateIndex, requestedDate, workerId });
+          promoteCameraCandidate(frame, `worker-${workerId}`);
         } catch (error) {
           frame = await writeErrorFrame(modeOutputDir, {
             mode,
@@ -462,12 +529,13 @@ async function runAnnualInjectBurst(mode, modeOutputDir, dates, browsers, { actu
       workerReport.errors.push({ workerError: String(error.stack || error.message || error).slice(0, 1000) });
     } finally {
       workerReport.totalMs = Date.now() - workerStart;
+      workerReport.cameraCandidateUpdates = cameraCandidateUpdates.slice();
       workerReports.push(workerReport);
       await context?.close().catch(() => {});
     }
   }));
 
-  return buildModeReport({
+  const report = buildModeReport({
     mode,
     strategy: 'direct-date-injection',
     modeOutputDir,
@@ -478,6 +546,12 @@ async function runAnnualInjectBurst(mode, modeOutputDir, dates, browsers, { actu
     actualBrowsers,
     workerReports
   });
+  report.cameraCandidateCalibration = {
+    enabled: calibrateFirstFrame && zoomFallback,
+    finalPreferredCameraCandidate: cameraCandidateSummary(sharedCameraCandidate),
+    updates: cameraCandidateUpdates
+  };
+  return report;
 }
 
 async function runAnnualCropLoop(mode, modeOutputDir, dates, browsers, { actualWorkers, actualBrowsers }) {
@@ -523,7 +597,11 @@ async function runAnnualCropLoop(mode, modeOutputDir, dates, browsers, { actualW
             minDetailScore,
             minCenterSharpnessScore,
             preferredCameraAltitude,
+            intermediateFallbackCameraAltitude,
+            largeFallbackCameraAltitude,
             zoomLevel,
+            strictCameraAltitude: !zoomFallback,
+            matchRequestedZoomExtent,
             markLocation: false,
             includeDateLabel: false,
             extractImageryDate: false,
@@ -659,65 +737,165 @@ async function waitForSelectedDate(page, expectedDate, timeoutMs) {
 
 async function saveBurstFrame(page, modeOutputDir, frame) {
   const frameStart = Date.now();
-  await page.waitForTimeout(renderSettleMs);
-  let selectedDate = frame.selectedDate ?? selectedDateFromUrl(page.url()) ?? null;
-  const safeLabel = labelForLocation(frame.label ?? selectedDate ?? `frame-${frame.frameNumber}`);
+  const requestedDate = frame.requestedDate ?? frame.selectedDate ?? selectedDateFromUrl(page.url()) ?? null;
+  const safeLabel = labelForLocation(frame.label ?? requestedDate ?? `frame-${frame.frameNumber}`);
   const outputPath = path.join(modeOutputDir, `${String(frame.frameNumber).padStart(3, '0')}-${safeLabel}.png`);
-  let screenshot = await page.screenshot({ fullPage: false, scale: 'css', clip });
-  let analysis = analyzeShot(screenshot, minDetailScore, minCenterSharpnessScore);
-  let qualityRetryReport = null;
-  if (qualityRetry && (analysis.splash || analysis.blank || analysis.lowDetail || analysis.blurred)) {
-    qualityRetryReport = { firstAnalysis: analysis, waitMs: qualityRetryWaitMs, tileRefreshRetry };
-    let retriedWithTileRefresh = false;
-    if (tileRefreshRetry && selectedDate && (analysis.lowDetail || analysis.blurred) && !analysis.splash && !analysis.blank) {
-      const refreshResult = await refreshHistoricalTilesBeforeCutoff(page, selectedDate, frame.requestedDate ?? selectedDate, {
-        clip,
-        minDetailScore,
-        minCenterSharpnessScore,
-        currentAnalysis: analysis
-      }).catch((error) => ({
-        status: 'error',
-        error: String(error.message || error).slice(0, 300)
-      }));
-      const { screenshot: refreshScreenshot, analysis: refreshAnalysis, transientUi: _transientUi, ...refreshMetadata } = refreshResult;
-      qualityRetryReport.historicalTileRefresh = refreshMetadata;
-      if (refreshResult.status === 'ok' && refreshScreenshot && refreshAnalysis) {
-        screenshot = refreshScreenshot;
-        analysis = refreshAnalysis;
-        selectedDate = refreshResult.acceptedDate ?? selectedDateFromUrl(page.url()) ?? selectedDate;
-        retriedWithTileRefresh = true;
+  const jsonPath = outputPath.replace(/\.png$/i, '.json');
+  const candidates = burstCameraCandidates(frame.preferredCameraCandidate);
+  const attempts = [];
+  let finalAttempt = null;
+
+  for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
+    const candidate = candidates[candidateIndex];
+    const attemptStart = Date.now();
+    let selectedDate = frame.selectedDate ?? selectedDateFromUrl(page.url()) ?? null;
+    let navigation = {
+      ...frame.navigation,
+      zoomFallbackStep: candidate.fallbackStep,
+      requestedCameraAltitude: candidate.cameraAltitude,
+      requestedZoomLevel: candidate.zoomLevel
+    };
+
+    if (candidateIndex > 0) {
+      const historicalUrl = withHistoricalDate(page.url(), requestedDate);
+      const zoomUrl = withCameraAltitude(historicalUrl, candidate.cameraAltitude);
+      const navigationStart = Date.now();
+      await page.goto(zoomUrl, { waitUntil: 'commit', timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(historyWaitMs);
+      const dateResult = await waitForSelectedDate(page, requestedDate, historyChangeTimeoutMs);
+      selectedDate = dateResult.selectedDate;
+      navigation = {
+        ...navigation,
+        strategy: 'direct-date-injection-zoom-fallback',
+        navigationMs: Date.now() - navigationStart,
+        dateMatched: selectedDate === requestedDate,
+        waitMs: dateResult.waitMs
+      };
+    }
+
+    await page.waitForTimeout(renderSettleMs);
+    const cleanShot = await screenshotWithoutTransientUi(page, clip);
+    let screenshot = cleanShot.screenshot;
+    let analysis = analyzeShot(screenshot, minDetailScore, minCenterSharpnessScore);
+    let qualityRetryReport = null;
+    if (qualityRetry && isFailingBurstAnalysis(analysis)) {
+      const allowHistoricalTileRefresh = tileRefreshRetry && candidateIndex === candidates.length - 1;
+      qualityRetryReport = {
+        firstAnalysis: analysis,
+        waitMs: qualityRetryWaitMs,
+        tileRefreshRetry: allowHistoricalTileRefresh,
+        tileRefreshDeferred: tileRefreshRetry && !allowHistoricalTileRefresh ? 'deferred-until-same-date-zoom-fallbacks-fail' : null,
+        transientUi: cleanShot.transientUi
+      };
+      let retriedWithTileRefresh = false;
+      if (allowHistoricalTileRefresh && selectedDate && (analysis.lowDetail || analysis.blurred) && !analysis.splash && !analysis.blank) {
+        const refreshResult = await refreshHistoricalTilesBeforeCutoff(page, selectedDate, requestedDate ?? selectedDate, {
+          clip,
+          minDetailScore,
+          minCenterSharpnessScore,
+          currentAnalysis: analysis
+        }).catch((error) => ({
+          status: 'error',
+          error: String(error.message || error).slice(0, 300)
+        }));
+        const { screenshot: refreshScreenshot, analysis: refreshAnalysis, transientUi: _transientUi, ...refreshMetadata } = refreshResult;
+        qualityRetryReport.historicalTileRefresh = refreshMetadata;
+        if (refreshResult.status === 'ok' && refreshScreenshot && refreshAnalysis) {
+          screenshot = refreshScreenshot;
+          analysis = refreshAnalysis;
+          selectedDate = refreshResult.acceptedDate ?? selectedDateFromUrl(page.url()) ?? selectedDate;
+          retriedWithTileRefresh = true;
+        }
+      }
+      if (!retriedWithTileRefresh && isFailingBurstAnalysis(analysis)) {
+        await page.waitForTimeout(qualityRetryWaitMs);
+        const cleanRetryShot = await screenshotWithoutTransientUi(page, clip);
+        screenshot = cleanRetryShot.screenshot;
+        analysis = analyzeShot(screenshot, minDetailScore, minCenterSharpnessScore);
+        qualityRetryReport.secondAnalysis = analysis;
+        qualityRetryReport.secondTransientUi = cleanRetryShot.transientUi;
       }
     }
-    if (!retriedWithTileRefresh && (analysis.splash || analysis.blank || analysis.lowDetail || analysis.blurred)) {
-      await page.waitForTimeout(qualityRetryWaitMs);
-      screenshot = await page.screenshot({ fullPage: false, scale: 'css', clip });
-      analysis = analyzeShot(screenshot, minDetailScore, minCenterSharpnessScore);
-      qualityRetryReport.secondAnalysis = analysis;
+
+    selectedDate = selectedDateFromUrl(page.url()) ?? selectedDate;
+    const finalCamera = cameraFromUrl(page.url());
+    const finalZoomLevel = Math.abs((finalCamera?.range ?? Infinity) - candidate.cameraAltitude) < 1e-6 ? candidate.zoomLevel : null;
+    const status = isFailingBurstAnalysis(analysis) ? 'error' : 'ok';
+    const attempt = {
+      attemptNumber: candidateIndex + 1,
+      selectedDate,
+      status,
+      error: status === 'error' ? burstFrameError(analysis) : null,
+      requestedCameraAltitude: candidate.cameraAltitude,
+      requestedZoomLevel: candidate.zoomLevel,
+      zoomFallbackStep: candidate.fallbackStep,
+      finalCamera,
+      finalZoomLevel,
+      bytes: screenshot.length,
+      analysis,
+      qualityRetry: qualityRetryReport,
+      navigation,
+      totalMs: Date.now() - attemptStart
+    };
+
+    let output = screenshot;
+    if (status === 'ok' && matchRequestedZoomExtent) {
+      const zoomExtentCrop = await cropFallbackToRequestedExtent(page, output, {
+        requestedZoomLevel: zoomLevel,
+        finalZoomLevel,
+        fallbackStep: candidate.fallbackStep,
+        requestedCameraAltitude: candidate.cameraAltitude,
+        fallbackZoomLevel: candidate.zoomLevel
+      });
+      if (zoomExtentCrop.applied) {
+        output = zoomExtentCrop.image;
+        attempt.zoomExtentCrop = zoomExtentCrop.metadata;
+        attempt.outputBytes = output.length;
+      }
     }
+
+    attempts.push(attempt);
+    finalAttempt = { ...attempt, screenshot: output };
+    if (status === 'ok') break;
   }
-  selectedDate = selectedDateFromUrl(page.url()) ?? selectedDate;
-  await fs.writeFile(outputPath, screenshot);
-  const jsonPath = outputPath.replace(/\.png$/i, '.json');
+
+  await fs.writeFile(outputPath, finalAttempt.screenshot);
   const record = {
     address,
     mode: frame.mode,
     frameNumber: frame.frameNumber,
-    requestedDate: frame.requestedDate,
-    selectedDate,
+    requestedDate,
+    selectedDate: finalAttempt.selectedDate,
     outputPath,
     jsonPath,
     googleEarthQueryUrl: googleEarthQueryUrl(address),
     pageUrl: page.url(),
-    camera: cameraFromUrl(page.url()),
+    camera: finalAttempt.finalCamera,
     workerId: frame.workerId ?? null,
-    bytes: screenshot.length,
-    analysis,
-    status: analysis.splash || analysis.blank || analysis.lowDetail || analysis.blurred ? 'error' : 'ok',
-    error: burstFrameError(analysis),
-    qualityRetry: qualityRetryReport,
+    bytes: finalAttempt.screenshot.length,
+    analysis: finalAttempt.analysis,
+    status: finalAttempt.status,
+    error: finalAttempt.error,
+    qualityRetry: finalAttempt.qualityRetry,
+    zoomFallback: {
+      enabled: zoomFallback,
+      requestedZoomLevel: zoomLevel,
+      requestedCameraAltitude: preferredCameraAltitude,
+      candidates: candidates.map((candidate) => ({
+        cameraAltitude: candidate.cameraAltitude,
+        zoomLevel: candidate.zoomLevel,
+        fallbackStep: candidate.fallbackStep
+      })),
+      preferredCandidate: cameraCandidateSummary(frame.preferredCameraCandidate),
+      used: finalAttempt.zoomFallbackStep !== 'requested-zoom'
+    },
+    zoomFallbackStep: finalAttempt.zoomFallbackStep,
+    finalZoomLevel: finalAttempt.finalZoomLevel,
+    zoomExtentCrop: finalAttempt.zoomExtentCrop ?? null,
+    attempts,
     renderSettleMs,
     totalMs: Date.now() - frameStart,
-    navigation: frame.navigation
+    navigation: finalAttempt.navigation
   };
   await fs.writeFile(jsonPath, `${JSON.stringify(record, null, 2)}\n`);
   return record;
@@ -758,6 +936,51 @@ function burstFrameError(analysis) {
   if (analysis.lowDetail) return `frame is low detail: detailScore ${analysis.detailScore.toFixed(2)} < ${minDetailScore}`;
   if (analysis.blurred) return `frame is center blurred: centerSharpnessScore ${analysis.centerSharpnessScore.toFixed(2)} < ${minCenterSharpnessScore}`;
   return null;
+}
+
+function isFailingBurstAnalysis(analysis) {
+  return Boolean(analysis?.splash || analysis?.blank || analysis?.lowDetail || analysis?.blurred);
+}
+
+function burstCameraCandidates(preferredCandidate = null) {
+  const requestedCandidate = { cameraAltitude: preferredCameraAltitude, zoomLevel, fallbackStep: 'requested-zoom' };
+  if (!zoomFallback) {
+    return [requestedCandidate];
+  }
+  const candidates = zoomLevelCameraCandidates(zoomLevel, {
+    intermediateFallbackCameraAltitude,
+    largeFallbackCameraAltitude
+  });
+  if (!preferredCandidate) return candidates;
+  const matchedCandidate = candidates.find((candidate) => sameBurstCameraCandidate(candidate, preferredCandidate));
+  if (!matchedCandidate) return candidates;
+  return [matchedCandidate, ...candidates.filter((candidate) => !sameBurstCameraCandidate(candidate, matchedCandidate))];
+}
+
+function preferredCameraCandidateFromFrame(frame) {
+  if (frame?.status !== 'ok') return null;
+  if (!Number.isFinite(frame.camera?.range)) return null;
+  if (!frame.zoomFallback?.used && frame.zoomFallbackStep === 'requested-zoom') return null;
+  return {
+    cameraAltitude: frame.camera.range,
+    zoomLevel: frame.finalZoomLevel ?? null,
+    fallbackStep: frame.zoomFallbackStep ?? 'learned-fallback'
+  };
+}
+
+function sameBurstCameraCandidate(left, right) {
+  return Boolean(left && right)
+    && Math.abs(left.cameraAltitude - right.cameraAltitude) < 1e-6
+    && (left.zoomLevel ?? null) === (right.zoomLevel ?? null);
+}
+
+function cameraCandidateSummary(candidate) {
+  if (!candidate) return null;
+  return {
+    cameraAltitude: candidate.cameraAltitude,
+    zoomLevel: candidate.zoomLevel ?? null,
+    fallbackStep: candidate.fallbackStep
+  };
 }
 
 function buildModeReport({ mode, strategy, modeOutputDir, open, frames, stopReason, actualWorkers = 1, actualBrowsers = 1, workerReports = [] }) {
@@ -858,7 +1081,7 @@ function positionalAddress() {
 function validateInputs() {
   if (!Number.isInteger(startYear) || startYear < 1900) throw new Error('--start-year must be a reasonable integer year');
   if (!Number.isInteger(endYear) || endYear < startYear) throw new Error('--end-year must be an integer year >= --start-year');
-  if (!Number.isInteger(annualFromYear) || annualFromYear < startYear || annualFromYear > endYear) throw new Error('--annual-from-year must be an integer year between --start-year and --end-year');
+  if (!Number.isInteger(annualFromYear) || annualFromYear > endYear) throw new Error('--annual-from-year must be an integer year <= --end-year');
   if (!Number.isInteger(olderYearInterval) || olderYearInterval <= 0) throw new Error('--older-year-interval must be a positive integer');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) throw new Error('--end-date must be YYYY-MM-DD');
   if (Number(endDate.slice(0, 4)) !== endYear) throw new Error('--end-date year must match --end-year');
@@ -896,9 +1119,12 @@ Options:
   --max-frames N           Useful for quick benchmarks
   --dry-run                Print the scheduled target dates and exit without launching Chromium
   --render-settle-ms N     Default ${DEFAULT_BURST_RENDER_SETTLE_MS}; lower is faster but riskier
-  --quality-retry        Retry splash/blank/low-detail/blurred burst frames before saving; off by default for speed/exact zoom
-  --quality-retry-wait-ms N Default 3000; extra wait when --quality-retry is enabled
-  --no-tile-refresh-retry Skip the older/newer historical tile refresh when --quality-retry is enabled
+  --no-quality-retry     Skip same-zoom retry for splash/blank/low-detail/blurred burst frames
+  --quality-retry-wait-ms N Default 3000; extra wait during same-zoom quality retry
+  --no-tile-refresh-retry Skip older/newer historical tile refresh during quality retry
+  --no-zoom-fallback     Skip lower/recovery zoom fallback candidates after quality retry fails
+  --no-match-requested-zoom-extent Skip center-crop/rescale of successful fallback zooms
+  --no-calibrate-first-frame Skip first-frame zoom fallback calibration for later burst frames
   --num-workers N        Concurrent worker pages/contexts for annual modes. Default ${DEFAULT_NUM_WORKERS}
   --num-browsers N       Chromium browser processes for annual modes. Default ${DEFAULT_NUM_BROWSERS}
   --retry-num-workers N  Worker contexts for auto-mode annual-crop-loop retry pass. Default ${DEFAULT_RETRY_NUM_WORKERS}

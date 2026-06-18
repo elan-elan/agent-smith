@@ -30,7 +30,7 @@ const COMMON_REQUIRED_COLUMNS = ['query_date', 'output_name'];
 const COORDINATE_LOCATION_COLUMNS = ['lat', 'lon'];
 const ADDRESS_LOCATION_COLUMNS = ['address', 'full_address', 'site_address', 'location', 'query'];
 const DEFAULT_NUM_WORKERS = 4;
-const DEFAULT_NUM_BROWSERS = 2;
+const DEFAULT_NUM_BROWSERS = 4;
 
 const csvOption = cliOptionValue('csv');
 const outputOption = cliOptionValue('output');
@@ -409,7 +409,7 @@ function compactCropManifest({ row, result }) {
     cutoffDate: row.queryDate,
     location: result.query,
     outputPath: result.outputPath,
-    zoomLevel: result.finalZoomLevel ?? zoomLevel ?? null,
+    zoomLevel: result.finalZoomLevel ?? result.requestedZoomLevel ?? zoomLevel ?? null,
     googleEarthQueryUrl: googleEarthQueryUrl(result.query),
     imageDateOcr: result.dateLabel?.ocr?.imageryDate ?? null,
     error: result.status === 'ok' ? undefined : result.error,
